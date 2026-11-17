@@ -1,0 +1,4 @@
+interface:
+  display_name: "自由能分析"
+  short_description: "分析约束力与增强采样结果，构建自由能曲线并明确参考态与统计范围。"
+  default_prompt: "使用 $free-energy-analysis 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

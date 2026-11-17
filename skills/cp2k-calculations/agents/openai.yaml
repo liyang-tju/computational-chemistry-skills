@@ -1,0 +1,4 @@
+interface:
+  display_name: "CP2K 计算准备"
+  short_description: "准备 CP2K 优化与动力学输入，核对基组、系综、电子初态和重启设置。"
+  default_prompt: "使用 $cp2k-calculations 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

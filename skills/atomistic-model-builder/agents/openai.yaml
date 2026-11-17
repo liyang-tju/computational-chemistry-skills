@@ -1,0 +1,4 @@
+interface:
+  display_name: "原子模型构建"
+  short_description: "构建分子、表面、溶剂盒与离子变体，保存原子分组、约束和结构来源。"
+  default_prompt: "使用 $atomistic-model-builder 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

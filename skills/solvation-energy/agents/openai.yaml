@@ -1,0 +1,4 @@
+interface:
+  display_name: "溶剂化能分量分析"
+  short_description: "组织冻结片段能量计算与组合，明确几何、电子态、采样和能量分量定义。"
+  default_prompt: "使用 $solvation-energy 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "VASP 计算准备"
+  short_description: "准备 VASP 优化、单点与分子动力学输入，落实科学参数和重启兼容性。"
+  default_prompt: "使用 $vasp-calculations 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

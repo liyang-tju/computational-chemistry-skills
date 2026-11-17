@@ -1,0 +1,4 @@
+interface:
+  display_name: "轨迹统计分析"
+  short_description: "分析密度、取向、氢键、构象和反应事件，统一采样范围与误差统计口径。"
+  default_prompt: "使用 $trajectory-analysis 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

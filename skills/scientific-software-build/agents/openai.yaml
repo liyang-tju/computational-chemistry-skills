@@ -1,0 +1,4 @@
+interface:
+  display_name: "科学软件构建"
+  short_description: "整理编译器与计算依赖，隔离软件构建和补丁版本并验证实际运行能力。"
+  default_prompt: "使用 $scientific-software-build 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

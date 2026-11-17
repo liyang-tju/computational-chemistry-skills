@@ -1,0 +1,42 @@
+# 可选的本地运行配置示例；此文件不会被 Codex 自动加载。
+# 空字符串表示尚未提供，不得自动猜测科学协议或提交资源。
+# 在任务副本中填值；可分发技能保持与具体主机无关。
+
+[runtime]
+python_command = "python"
+setup_commands = []
+working_directory = ""
+
+[scheduler]
+kind = "none"
+partition_or_queue = ""
+account = ""
+qos = ""
+launcher = ""
+
+[resources]
+nodes = ""
+mpi_ranks = ""
+cpus_per_rank = ""
+gpus = ""
+gpu_type = ""
+memory = ""
+walltime = ""
+
+[software]
+vasp = ""
+cp2k = ""
+lammps = ""
+plumed = ""
+orca = ""
+multiwfn = ""
+packmol = ""
+
+[data]
+pseudopotential_directory = ""
+basis_directory = ""
+model_path = ""
+
+[analysis]
+matplotlib_style = ""
+output_directory = "results"
