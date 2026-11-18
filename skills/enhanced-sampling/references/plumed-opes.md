@@ -1,13 +1,50 @@
 # PLUMED 与 OPES
 
-显式声明长度、能量和时间单位，核对引擎与 ASE wrapper 的换算。PACE 通常按 MD 步计；实际沉积时间间隔取决于时间步，不能把二者混同。
+## 1. 单位声明与 OPES 输入模板
 
-EXCLUDED_REGION 用于控制特定区域是否沉积偏置，并非排斥壁。需要限制 CV 区域时使用与科学问题一致的壁或约束，并记录它们会改变采样域。
+```text
+# 务必首行显式指定单位，与 ASE/VASP/LAMMPS metal 对齐
+UNITS LENGTH=A ENERGY=eV TIME=ps
 
-新模拟使用明确的 fresh 语义和空偏置状态。续算使用匹配核文件、步号、CV 定义和引擎状态，不能只修改 RESTART 字样。
+# 1-based 原子索引与 PBC 行为（NOPBC 仅在确认不会跨盒断裂时使用）
+d: DISTANCE ATOMS=12,45
+coord: COORDINATION GROUPA=12 GROUPB=45-60 R_0=1.35 NN=6 MM=12
 
-PLUMED driver 的解析只检查部分语法与动作可用性；还需核对实际引擎接口。对按字符串列表传入的 ASE 接口，确认其处理多行块的方式，必要时将一个动作整理成一条完整输入；不能对所有接口盲目套用同一文本变换。
+opes: OPES_METAD ...
+  ARG=d
+  PACE=100
+  BARRIER=0.50       # 单位 eV (相当于 ~48 kJ/mol)，按实际预期能垒调整
+  TEMP=300
+  FILE=KERNELS
+  STATE_WFILE=STATE
+  STATE_WSTRIDE=1000
+...
 
-自定义 LOAD 文件的相对位置应对实际执行目录有效。临时检查保留依赖布局，运行中生成的文件留在临时或专用测试目录。
+# 限制壁（防止脱附跑飞；不同于 EXCLUDED_REGION）
+uwall: UPPER_WALLS ARG=d AT=6.0 KAPPA=20.0 EXP=2
 
-短程检查应观察 CV 数值、偏置大小及相关力是否有限，并检查预期极限行为；检查通过不证明采样充分或自由能已收敛。
+PRINT ARG=d,coord,opes.bias,uwall.bias STRIDE=10 FILE=COLVAR
+```
+
+- **`OPES_METAD` 常见语义陷阱**：
+  - `BARRIER` 单位随 `UNITS ENERGY=...` 改变！若误把 kJ/mol 的数值 `50` 当成 eV 填入，会导致偏置强度荒谬放大近 100 倍。
+  - `EXCLUDED_REGION` 只控制不往某个高能区沉积核，**不会把系统推回感兴趣区域**；需要防止构型飘远须使用 `UPPER_WALLS` / `LOWER_WALLS`。
+  - 续算时需加 `RESTART=YES` 及 `STATE_RFILE=STATE`（并确认 `STATE` 与 MD 重启文件处于同一时间步）；若重启后切换了 CV 定义或温度，应明确开始全新偏置或查阅当前 PLUMED 版本的重读限制。
+
+## 2. ASE `Plumed` 与自定义 `LOAD` 接口注意
+
+- **ASE `Plumed` 多行块问题**：ASE 的 `ase.calculators.plumed.Plumed(atoms, input=lines, timestep=...)` 传入字符串列表时，某些版本会按行直接送入 PLUMED，不支持把多行 `...` 块拆开或含特定注释方式，或对不同版本有换行解析差异。在 ASE 环境下使用多行动作时，建议将每个动作整理为单行命令（去掉 `...` 续行符）并在测试目录实际初始化跑 2 步核对 `COLVAR`。
+- **自定义库路径**：若 `plumed.dat` 中使用 `LOAD FILE=./CustomAction.cpp`，相对路径是相对于**实际启动 MD 进程的工作目录**，测试和生产脚本需保持一致。
+
+## 3. `plumed driver` 快速校验命令
+
+```bash
+# 1. 检查当前 PLUMED 版本与内置/已加载动作
+plumed info --version
+
+# 2. 对现有轨迹或测试构型做干跑检查（查看 COLVAR 输出范围是否合理）
+plumed driver --plumed plumed.dat --mf_extxyz test_init.extxyz --timestep 0.001 --length-units A
+head -n 10 COLVAR
+```
+
+- 短程 MD 验收重点：`COLVAR` 第一帧数值与手工几何计算完全一致；偏置力施加后，前 10 步能量/温度/原子速度有限且无突然爆炸。

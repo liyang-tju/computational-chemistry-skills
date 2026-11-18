@@ -1,32 +1,85 @@
 ---
 name: atomistic-model-builder
-description: "Build molecules, slabs, adsorption structures, solvated cells and ion variants with ASE and optional packing tools. Use for geometry and atom mapping; force-field fitting and simulation production are separate tasks."
+description: "Build molecules, crystals, slabs, adsorption structures, solvated cells and ion variants with ASE and Packmol. Use for geometry construction, PBC checks, FixAtoms constraints and atom mapping; force-field fitting and production MD belong to separate skills."
 ---
 # 原子模型构建
 
-根据明确的化学组成和边界条件构建结构，以 ASE Atoms 保存坐标、晶胞、PBC 和约束。几何构建不自动包含力场参数化或生产模拟。
+使用 ASE（及可选 Packmol）构建分子、块体、表面 slab、吸附体系、溶剂盒与离子/质子缺陷变体，确保坐标、晶胞、周期性边界条件（PBC）、固定层约束及原子映射可追溯。本技能只负责几何构建与结构检查，不包含力场参数化或生产模拟。
+
+## 开始前确认
+
+- **体系组成与边界**：化学式、总电荷、质子化状态、PBC（三维周期 `pbc=True` 或二维 slab `pbc=(True, True, True)` + 真空层）。
+- **表面参数**（若为界面）：参考体相来源、晶面 `(hkl)`、面内超胞、原子层数、终端面（termination）、固定层判据（按层/z 阈值）及真空厚度（常见 15–20 Å）。
+- **溶剂与离子**（若含液相）：目标区间（相对表面高度还是全盒）、目标密度或粒子数、最小安全间距（如 $d_{\min} \ge 1.5\text{–}2.0\,\text{\AA}$）及随机种子。
 
 ## 工作流程
 
-1. 明确组成、总电荷、质子化状态、表面取向、超胞、约束和需要变化的因素。优先从用户指定且经过核实的参考结构构建。
-2. 记录原始原子身份，建立新增、删除或重排后的映射；同时保存 slab、adsorbate、solvent、ion 等逻辑分组。不要以元素相同推断角色相同。
-3. 分子或聚合物先确认键连接、重复单元、端基和立体化学。表面模型明确层数、面内尺寸、真空方向、掺杂位置和固定层定义。
-4. 溶剂与离子放置明确目标空间、周期边界及最小接触要求。Packmol 等工具的输入分子与放置范围可参数化；盒总体积不一定等于溶剂可用体积。
-5. 对照目标原子数、元素计数、最小距离、晶胞与约束，检查跨周期边界的接触。生成可供查看的结构文件或图像；图像不能代替数值结构检查。
-6. 比较不同条件时保留参考来源，明确实际改变的变量。独立初态应记录抽帧时刻或构建随机种子，不把复制同一构型称为独立重复。
-7. 若需要预优化，交付到匹配的计算程序；未达到收敛的结构标记为候选，不能仅凭作业结束称为优化结构。
+### 1. 构建参考结构与基础几何
+
+- **体相/表面**：优先从核实过的实验 CIF 或已优化体相晶胞出发，使用 `ase.build.surface` / `fcc111` / `make_supercell` 切割并加真空层（`slab.center(vacuum=15.0, axis=2)`）。
+- **吸附构型**：用 `add_adsorbate` 或旋转平移（`rotate`/`translate`）放置吸附质，保留位点名称（如 `top` / `bridge` / `fcc`）和取向标签。
+- **固定层约束**：按原子层 `tags` 或几何高度规则（如 `z < z_cutoff`）生成 `FixAtoms`，避免直接硬编码另一体系的原子索引。
+
+```python
+from ase.build import fcc111, add_adsorbate
+from ase.constraints import FixAtoms
+
+slab = fcc111("Pt", size=(4, 4, 4), vacuum=15.0)
+# 按底两层固定（依据 z 坐标聚类或 tag，而非猜测索引）
+z_layers = sorted(set(round(z, 2) for z in slab.positions[:, 2]))
+z_fix_max = z_layers[1] + 0.2
+slab.set_constraint(FixAtoms(mask=slab.positions[:, 2] <= z_fix_max))
+```
+
+### 2. 添加溶剂、离子或缺陷
+
+- **估算溶剂分子数**：按**可及自由体积** $V_{\text{free}}$（扣除表面/溶质排除体积）估算初始分子数，不要直接用整个模拟盒体积估算：
+  $$N_{\text{sol}} \approx \frac{\rho \cdot V_{\text{free}}\,(\text{\AA}^3) \cdot 10^{-24} \cdot N_A}{M\,(\text{g/mol})}$$
+  对常温纯水（$\rho \approx 1.0\,\text{g/cm}^3, M = 18.015\,\text{g/mol}$），约合 $0.0334\,\text{molecules/\AA}^3$。
+- **Packmol 填充**：将放置盒子向内缩进半个 `tolerance`（如 `z_min + 1.0` 到 `z_max - 1.0`），避免 Packmol 在非周期边界放入分子后跨周期边界发生原子重叠。
+- **质子/离子变体**：新增或删除原子（如 $\text{H}_2\text{O} \to \text{OH}^-$ 或 $\text{H}_3\text{O}^+$）时，同步记录化学计量变化、预期总电荷与电子数（供下游 DFT/MD 使用）。
+
+### 3. 建立原子映射与逻辑分组
+
+为所有原子记录稳定的分组标签（如 `slab`、`adsorbate`、`solvent`、`ion`），导出 `atom_mapping.csv`。对于发生重排、删减或拼接的结构，必须保留原始索引到新索引的映射：
+
+| 列名 | 含义 |
+|---|---|
+| `new_index` | 输出结构中的 0-based 原子序号 |
+| `source_id` | 来源结构标识 |
+| `orig_index` | 原结构中的 0-based 序号（新建为 `-1`） |
+| `element` | 元素符号 |
+| `role` | 逻辑角色（`slab` / `adsorbate` / `solvent` / `ion`） |
+| `fixed` | 是否被约束固定（`True` / `False`） |
+
+### 4. 数值结构自检（必须执行）
+
+写出结构后必须重新读回并用 **最小像距（MIC）** 检查跨周期边界接触、原子数和晶胞合法性：
+
+```python
+import numpy as np
+from ase.io import read
+
+atoms = read("model.extxyz")
+dists = atoms.get_all_distances(mic=True)
+np.fill_diagonal(dists, np.inf)
+min_d = dists.min()
+i, j = np.unravel_index(np.argmin(dists), dists.shape)
+print(f"natoms={len(atoms)}, min_mic_dist={min_d:.3f} A ({atoms[i].symbol}{i}-{atoms[j].symbol}{j})")
+assert np.all(np.isfinite(atoms.positions)), "存在 NaN/Inf 坐标"
+assert min_d > 0.85, f"发现严重重叠原子对: {i}-{j} ({min_d:.3f} A)"
+```
+
+- 分子内部共价键（如 `O-H ~ 0.96–1.05 Å`）与非键最小距离（通常要求 `> 1.5 Å`）应分别检查。
+- 对仅完成几何构建或预松弛（未收敛）的结构，标记为 `candidate` / `unrelaxed`，不能标记为已优化。
 
 ## 按需参考
 
-- 表面、吸附、溶剂与离子：读取 [结构构建要点](references/geometry.md)。
+- 表面切割、正交化陷阱、吸附位点去重及 Packmol 细节：阅读 [结构构建要点](references/geometry.md)。
 
-## 输出
+## 交付产物与验收
 
-结构文件、build.py、atom_mapping.csv 和简短构建配置。使用相对数据标识说明参考来源；不在可分享脚本中固定某个项目的原子编号、目录或元素组合。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+1. **结构文件**：`*.extxyz` / `POSCAR` / `*.cif`（含完整 `cell`、`pbc`、`constraints` 及 `info` 元数据）。
+2. **`build.py`**：顶部集中配置输入、目标参数、随机种子与输出路径，可直接复现。
+3. **`atom_mapping.csv`**：完整原子索引与角色映射表。
+4. **`build_summary.json`**：记录参考来源、元素计数、总原子数、净电荷、约束数量、最小 MIC 间距及随机种子。

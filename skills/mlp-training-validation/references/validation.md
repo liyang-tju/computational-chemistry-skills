@@ -1,21 +1,57 @@
 # 模型验证与部署
 
-## 训练设置
+## 1. 训练配置核对清单
 
-记录软件实现、架构、预训练来源、损失权重、优化器、学习率、batch size、精度、数据划分与种子。委员会保持受控差异，数量不固定为某个历史值。
+启动前在配置文件或命令行核实以下核心项：
+- **数据键名对齐**：`--energy_key`、`--forces_key`、`--stress_key` 与 `train.extxyz` 中的字段名严格一致（例如 `REF_energy` vs `energy`，错配时可能静默读错或报错）。
+- **参考能量 `E0s`**：使用 `average` 或显式 DFT 孤立原子能量字典 `"{1: -1.11, 8: -1.56}"`，且保证同一委员会或对比实验完全一致。
+- **SWA（Stage Two）切换**：若开启两阶段损失加权（如后期提高能量权重），分别记录 Stage 1 与 Stage 2 各自的最佳验证检查点，使用对应最终导出模型做评测。
 
-恢复训练核对模型、优化器、调度器和数据版本；更换数据或科学标签时不要不加说明地继续旧优化状态。分布式布局变化可能改变数值路径，不能承诺逐位复现。
+## 2. 导出模型实测校验（不可省略）
 
-## 模型产物
+作业结束后，必须用最终部署时实际调用的 Calculator 加载导出文件验证一次前向计算：
 
-训练日志结束不等于导出模型可用。实际加载选定模型与导出版本，在代表构型上比较输出、单位、原子顺序和所需额外输入。编译或转换后的产物要使用部署运行器验证。
+```python
+import numpy as np
+from ase.io import read
+from mace.calculators import MACECalculator
 
-分别报告能量/原子、总能量、力分量及其他目标量的指标，明确数据粒度。CP-MACE 等额外电子输入、势能导数与预测电子量的关系按实际实现定义检验，不根据名字猜测。
+calc = MACECalculator(model_paths="model_compiled.model", device="cpu", default_dtype="float64")
+frames = read("test.extxyz", index=":10")
 
-## MD 与不确定性
+e_errs, f_errs = [], []
+for atoms in frames:
+    ref_e = atoms.info["REF_energy"]
+    ref_f = atoms.arrays["REF_forces"]
+    test_atoms = atoms.copy()
+    test_atoms.calc = calc
+    pred_e = test_atoms.get_potential_energy()
+    pred_f = test_atoms.get_forces()
+    e_errs.append(abs(pred_e - ref_e) / len(atoms) * 1000.0)  # meV/atom
+    f_errs.append(np.sqrt(np.mean((pred_f - ref_f) ** 2)) * 1000.0)  # meV/A
 
-短 MD 检查有限能量/力、约束、温度与结构行为；若目标是能量守恒，使用与该测试匹配的条件。短程稳定不能证明长时间生产、反应路径或外推可靠。
+print(f"Sample check -> E_MAE: {np.mean(e_errs):.2f} meV/atom, F_RMSE: {np.mean(f_errs):.2f} meV/A")
+```
 
-去掉 MD 初态中的陈旧参考/预测输出，保留运行器真正需要的电子态、速度和约束。委员会成员、模型路径与数量核对后再运行。
+- 对 CP-MACE 等带额外输入（如电势/电荷/费米能）的变体，额外检查预测电子量与能量对电子变量导数的自洽性。
 
-不确定性记录定义、成员数、阈值和每个候选的来源时间。分歧阈值应由任务或校准确定；异常几何与有效稀有事件分别处理。采集候选不自动授权 DFT 标注或下一轮训练。
+## 3. 短程 MD 验证（NVE 与 NVT）
+
+- **NVE 能量守恒测试**（验证势能面与力场导数平滑度）：
+  - 在无恒温器、小步长（如 `0.5 fs`）下运行短程 NVE（如 2–5 ps），检查总能相对漂移 $|\Delta E_{\text{tot}}| / N_{\text{atoms}}$ 是否保持在合理范围内且无阶跃跳变。
+  - 若体系存在 `FixAtoms` 约束，注意约束下的自由度与温度定义，不能把被固定原子的“零动能”混入自由原子自由度。
+- **NVT 稳定性检查**：检查轨迹中是否出现非物理靠近（`min_mic_dist < 0.8 Å`）、键长畸变或原子飞散。短程稳定仅证明无明显漏洞，正式长时采样仍需配合不确定性监测。
+
+## 4. 委员会不确定性（Committee Disagreement）
+
+加载多个独立种子的模型计算逐原子力标准差：
+
+```python
+# forces_by_model shape: (n_models, natoms, 3)
+std_per_component = np.std(forces_by_model, axis=0)          # (natoms, 3)
+sigma_f_atom = np.linalg.norm(std_per_component, axis=1)     # 每原子力不确定性 (eV/A)
+max_sigma_f = float(np.max(sigma_f_atom))
+```
+
+- **解读边界**：委员会分歧反映的是“训练数据分布之外的认知不确定性”，并非精确预测误差；需在验证集上校准 $\sigma_F$ 与真实力误差的相关性后再设定主动学习采集阈值（如 `0.15–0.30 eV/Å`）。
+- 采集到高不确定性候选帧后，**先检查其几何是否已经发生崩溃**，确认有效后再送交 `$representative-selection` 或 `$dft-labeling`（采集本身不自动触发 DFT 提交）。

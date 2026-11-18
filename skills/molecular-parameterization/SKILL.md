@@ -1,32 +1,54 @@
 ---
 name: molecular-parameterization
-description: "Prepare molecular quantum calculations, ESP or RESP fitting, atom typing and force-field topology assembly. Use for molecules and polymers needing transferable charge and parameter mappings, not general wavefunction analysis."
+description: "Prepare molecular quantum geometry/frequency checks, ESP/RESP charge fitting, atom typing and force-field topology assembly (including polymer head/monomer/tail templates) while preserving atom mapping and mixing-rule compatibility."
 ---
 # 分子参数化
 
-从分子或聚合物结构得到可追溯的电荷与力场拓扑。先明确所采用的力场家族和电荷协议，再准备计算。
+从分子、离子或聚合物结构出发，完成量化优化与频率校验、ESP/RESP 电荷拟合、力场原子类型匹配与拓扑组装，确保原子索引映射、电荷约束、1–4 缩放规则和混合规则可追溯且自洽。
+
+## 开始前确认
+
+- **目标力场家族与模拟引擎**：GAFF/GAFF2、OPLS-AA、CHARMM 等力场家族，以及最终运行引擎（LAMMPS `data` / GROMACS `.itp`/`.top` / Amber `.mol2`+`.frcmod`）。
+- **化学模型与构象**：分子连接关系（SMILES/MOL2/SDF）、端基、聚合物重复单元（head/internal/tail）、净电荷、自旋多重度与代表性构象列表。
+- **量化与电荷协议**：优化泛函/基组、是否需要频率校验、ESP 计算层级（如 B3LYP/6-31G* 或用户指定协议与溶剂条件）、RESP 约束方式（单构象还是多构象联合拟合）及可用工具（ORCA/Gaussian、Multiwfn、AmberTools `antechamber`/`parmchk2`、`acpype` 等）。
 
 ## 工作流程
 
-1. 确认键连接、端基、重复单元、总电荷、多重度和需要表示的构象。重复单元数量与侧链长度分别参数化。
-2. 将几何优化、频率检查、波函数单点及电荷拟合分为明确阶段。读取既有协议或用户选择，不将某个项目的泛函、基组和溶剂设为普适默认。
-3. 维护各阶段原子映射，检查量化计算收敛以及频率结果对应的几何含义。仅需要固定几何单点时，不额外重新优化。
-4. 按所选协议构建 ESP 点与拟合约束，记录等价原子、片段电荷和约束来源。RESP 名称本身不足以说明量化层级、拟合阶段或环境。
-5. 为目标力场生成原子类型、键合和非键合参数；核对缺失项、总电荷、质量、键连接、混合规则与 1–4 缩放。
-6. 聚合物模板提取保留头部、中间与尾部映射；检查拼接后的端基处理与总电荷，而不只验证孤立片段。
-7. 准备小体系能量或结构一致性检查。改变力场家族时，用独立输出明确变化项；不能只复制电荷文件就宣称完整兼容。
+### 1. 核对键连接与原子映射
+
+- 从带有明确键级和氢原子的输入出发（如 `.mol2`/`.sdf`），为全原子建立稳定索引与原子名称，防止量化软件重排或脱帽连接时编号错乱。
+- 对于**聚合物**：预先拆清**端帽（capping groups）**与**主链连接点（head/tail junctions）**，明确拼接时删除的原子和新增的共价键。
+
+### 2. 分阶段准备量化计算（不混并阶段）
+
+1. **构型优化（Opt）**：如目标构象尚未优化，在明确协议下优化并核对几何收敛与化学键未发生意外断裂。
+2. **频率验证（Freq）**：仅当需要确认驻点或计算热力学修正时运行频率；**必须检查全部振动频率为正（无虚频）**才可标为极小点（仅存在频率输出文件不够）。若用户指定做固定构象单点，不私自重新优化几何。
+3. **波函数/ESP 单点（SP）**：导出含完整轨道和基组的文件（`.fchk`/`.wfx`/`.molden`）或量化软件直接写出的格点 ESP 文件。
+
+### 3. 执行 ESP / RESP 电荷拟合
+
+按所选拟合协议记录（详见 [电荷与拓扑](references/charges-topology.md)）：
+- 静电势采样网格/表面定义（如 MK / CHELPG / Connolly 壳层）、双阶段 RESP 约束权重与等价原子组（如甲基三个氢原子强制等价）；
+- 检查总电荷精确闭合（整数或指定小数精度）；对聚合物提取**头部、中间重复单元、尾部**电荷模板时，需显式说明端帽电荷约束和余数微调去向。
+
+### 4. 生成力场原子类型与拓扑文件
+
+- 使用 `antechamber` + `parmchk2` / `acpype` / 目标拓扑工具生成原子类型、键、角、二面角、非正常二面角（impropers）及 Lennard-Jones 参数。
+- 检查是否存在高惩罚值或缺失的二面角/键合项（如 `.frcmod` 中的 `ATTN, need revision` 标记），明确报告待校验参数，不可无声忽略。
+- 严格核对**力场家族一致性**：不同力场的 1–4 缩放因子（`special_bonds` / `fudgeLJ`、`fudgeQQ`）和组合规则（Lorentz-Berthelot `arithmetic` vs `geometric`）不同，不能把某套电荷直接硬塞进另一力场框架而声称标准兼容。
+
+### 5. 单分子一致性校验
+
+将最终生成的力场拓扑转换到目标 MD 引擎（如 LAMMPS / GROMACS）后，跑一次单分子能量/短程优化检验：
+- 核对原子总数、总质量、净电荷总和；
+- 检查与量化参考构象相比是否发生键长/键角剧烈畸变或环翻转错误。
 
 ## 按需参考
 
-- ESP/RESP 与聚合物模板：读取 [电荷与拓扑](references/charges-topology.md)。
+- 量化导出格式、Multiwfn/RESP 拟合阶段区分、聚合物模板处理与力场混合规则核对表：阅读 [电荷与拓扑](references/charges-topology.md)。
 
-## 输出
+## 交付产物与验收
 
-量化输入、拟合输入与记录、charges.csv、拓扑文件和 parameterization.json。输出包含原子映射、方法、单位、约束及需要人工选择的科学假设，不包含软件许可证或个人目录。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+1. 量化输入与收敛核验记录、`charges.csv`（含等价组与约束说明）。
+2. 目标引擎拓扑文件（如 `.mol2`/`.frcmod`/`.itp`/`system.data`）及 `atom_mapping.csv`。
+3. **`parameterization.json`**：记录量子层级、电荷方法、力场家族、1–4 缩放规则、混合规则与已知缺失/经验参数提示。

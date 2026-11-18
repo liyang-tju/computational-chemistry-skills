@@ -1,28 +1,50 @@
 ---
 name: electronic-properties
-description: "Analyze work functions, dipoles, electrostatic profiles, charge differences, Bader and Multiwfn quantities. Select inputs with sufficient electronic information and record units, signs and reference conventions."
+description: "Analyze periodic and molecular electronic properties including work functions, planar electrostatic potentials, charge density differences, Bader charges, dipoles and Multiwfn wavefunction quantities. Verify input completeness, sign conventions and reference zeros."
 ---
 # 电子结构与波函数分析
 
-先判断所求物理量需要哪些电子信息，再选择数据与工具。几何文件不能代替含轨道或电子密度的输入。
+根据目标电子性质挑选包含真实电子密度、静电势或波函数信息的计算产物（纯几何 `.xyz`/`.poscar` 不能提供轨道电子性质），统一坐标方向、符号约定与参考零点并生成可复现分析结果。
+
+## 开始前确认
+
+- **目标物理量**：功函数 $\Phi$、平面平均静电势剖面、差分电荷密度 $\Delta \rho$、Bader 电荷、偶极矩、还是 Multiwfn 分子轨道/ESP/RESP/键级/体积/弱相互作用（NCI/RDG）分析。
+- **输入可用性与收敛性**：确认 `OUTCAR`/日志显示电子步已真正收敛，且已输出对应密度/势场/波函数文件（如 `LOCPOT`、`CHGCAR`+`AECCAR0`/`AECCAR2`、`WAVECAR`、`.fchk`、`.wfx`、`.molden`）。
+- **体系特性**：中性还是带净电荷、自旋极化（`ISPIN = 2`）与否、非对称 slab 是否开启偶极修正（`LDIPOL`/`IDIPOL`）。
 
 ## 工作流程
 
-1. 明确性质、输入阶段、几何、电荷、自旋、周期性和电子收敛情况。确认所需波函数、势场或密度确实属于目标计算。
-2. 对周期体系根据 [周期电子性质](references/periodic.md) 处理功函数、偶极、电势剖面、电荷差分和 Bader。
-3. 对分子或 Multiwfn 根据 [波函数分析](references/wavefunction.md) 选择文件、功能与当前版本实际交互。
-4. 明确符号、单位、坐标方向和参考零点。带电体系偶极、势能参考与不同程序定义需特别区分。
-5. 在独立输出目录操作，不覆盖源波函数或全局设置。大网格、拓扑分析和批量计算使用合适资源。
-6. 保存可重复的命令或输入序列、参数与数值输出；只有在实际输出有效后报告完成。
-7. 比较不同结构或条件时保留几何来源、计算协议和采样类别。性质相关性不自动代表因果关系。
+### 1. 核查输入与电子态完整性
 
-## 输出
+- 先检查源计算目录正常终止且电子步收敛，核对净电荷、自旋多重度与原子总数是否与当前结构一致。
+- 避免误读目录里遗留的旧版本 `CHGCAR`/`ACF.dat`/`.fchk`，核对修改时间与对应日志关联性。
 
-性质表、必要的 profile/cube 文件、分析日志及可复用脚本或交互输入。原始授权软件文件、个人路径和认证信息不加入可分享技能。
+### 2. 按体系类型执行对应分析路线
 
-## 使用约定
+- **周期体系（VASP / CP2K）**：按 [周期电子性质](references/periodic.md) 处理：
+  - 功函数与静电势剖面：平面平均 `LOCPOT`，校验真空平台平坦度与上下表面差异；
+  - 电荷密度差：校验原胞、原点及 FFT 网格完全一致后再做逐点减法并检算总电荷积分；
+  - Bader 电荷：联合全电子核密度 `AECCAR0` + `AECCAR2` 与 `CHGCAR` 计算并核算 `ZVAL` 总电荷闭合。
+- **分子与波函数（ORCA / Gaussian + Multiwfn）**：按 [波函数与 Multiwfn](references/wavefunction.md) 选择格式并先单样本实测菜单编号，再生成 `answers.txt` 批量执行。
 
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
+### 3. 明确符号、单位与参考原点
 
+所有输出表必须写清：
+- **电荷符号**：写出是**电子布居数**（$N_e$）还是**净电荷**（$q = Z_{\text{val}} - N_e$，正值代表失电子带正电）；
+- **偶极矩**：写明单位（`e·Å` 或 `Debye`，$1\,\text{e\cdot\AA} \approx 4.8032\,\text{D}$）、方向定义（正负号指向）以及带电体系所选取的坐标原点；
+- **势能零点**：显式区分费米能 $E_F$、真空平台能级 $E_{\text{vac}}$ 与体相内层参考窗口。
+
+### 4. 在独立输出目录保存命令与结果
+
+分析与临时大网格文件均放入新建输出目录（如 `analysis_elec/`），不覆盖原始波函数或全局软件配置（如 Multiwfn 全局 `settings.ini`）。
+
+## 按需参考
+
+- 功函数、`LOCPOT`、电荷密度差、Bader（`chgsum.pl` + `bader`）与带电偶极细节：阅读 [周期电子性质](references/periodic.md)。
+- Multiwfn 输入格式转换（`.fchk`/`.wfx`/`.molden`）、无界面批处理模板与电荷/体积定义辨析：阅读 [波函数与 Multiwfn](references/wavefunction.md)。
+
+## 交付产物与验收
+
+1. **性质汇总表**（`electronic_properties.csv`）及剖面/网格输出（如 `planar_avg.csv`、`ACF.dat`、`*.cube`）。
+2. **可复现脚本或命令序列**（如 `analyze_elec.py`、`answers.txt`、`settings.ini` 局部副本）。
+3. **验收标准**：Bader 总电子数闭合误差在网格精度内（通常 `< 0.05 e`）；密度差积分 $\int \Delta\rho\,dV \approx 0$（中性片段拆分时）；真空平台标准差满足平坦度要求。

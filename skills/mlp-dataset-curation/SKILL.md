@@ -1,28 +1,51 @@
 ---
 name: mlp-dataset-curation
-description: "Curate labeled atomistic datasets, check units and duplicate structures, and preserve or construct leakage-aware train-validation-test splits. Use after labeling and before model training."
+description: "Curate labeled atomistic datasets for MACE or other MLPs, validate units and physical fields, deduplicate structures and construct leakage-aware or incremental train-validation-test splits."
 ---
 # MLP 数据集整理
 
-整理已有标签并建立可解释的数据划分，避免结构、轨迹或目标来源在训练和评估之间造成泄漏。
+将已通过 DFT 标注验证的结构集合整理为高质量、防数据泄漏、格式与单位统一的机器学习势（MLP）训练/验证/测试集，并支持在主动学习迭代中安全追加新数据而不破坏既有测试集边界。
+
+## 开始前确认
+
+- **输入数据集与协议**：带标签 `extxyz` 文件（及对应的 `protocol.json`/`sample_map.csv`）；若为增量扩充，需提供已有数据集及 `split_index.csv`。
+- **目标模型字段规范**：例如 MACE 常用的 `REF_energy`（或 `energy`）、`REF_forces`（或 `forces`）、`REF_stress`（或 `stress`），以及电化学/带电模型需要的特定字段（如 `charge`、`nelect`、`potential`，务必核对模型实际读取的 key 名称与单位）。
+- **划分粒度与比例**：防泄漏分组键 `group_id`（如 `trajectory_id`、`system_id` 或 `condition_id`）、目标 `train/val/test` 比例、随机种子及孤立原子参考能量（`E0s`）。
 
 ## 工作流程
 
-1. 明确模型需要的字段与单位，建立输入到目标字段的显式映射。不能仅因字段名字接近就将 potential、potential_shift 或 electron 互相替代。
-2. 核对原子数、力数组形状、有限值、晶胞、PBC、能量参考与计算协议。缺失必要标签的样本分别记录，不造零值填补。
-3. 按 [重复与划分](references/splits.md) 检查数据内及新旧数据间的重复与关联。相同几何不同电荷/自旋/电势可能代表不同样本，不能只凭坐标丢弃。
-4. 用户要求保留旧划分时，保持已有成员身份，只对新增数据作分组和分层。若发现既有泄漏或冲突，明确报告，不静默重排旧数据。
-5. 选择适当的 train/validation/test 单位。构象帧、轨迹、体系和条件的外推测试具有不同含义，比例与随机种子由任务配置。
-6. 写出数据与索引，再读回确认字段、约束、计数与划分一致性。测试集不参与超参数、特征筛选或归一化拟合。
-7. 总结覆盖、排除项、协议差异和每组样本数；不同版本的标签可分组研究，但不能假装来自统一物理协议。
+### 1. 字段映射、单位检查与异常值筛查
 
-## 输出
+逐帧检查标签完整性和物理合理性，隔离缺标签或离群样本（绝不用 `0` 填补缺失能量/力）：
+- 检查 `energy` 为有限标量、`forces` 形状为 `(natoms, 3)` 且有限、原子数与元素类型合法、晶胞和 PBC 完整。
+- 统计单原子能量 $E/N$ 与最大受力 $\max \|\mathbf{F}_i\|$ 分布，排查潜在计算崩溃漏网帧（如 $\|\mathbf{F}_{\max}\| > 50\,\text{eV/\AA}$ 的畸变构型，核实是故意采样的高能态还是计算异常）。
+- 不同 `protocol_id`（如不同泛函、截断能或赝势）的标签**不能**无标记混进同一数据集。
 
-模型所需数据文件、split_index.csv、schema.json、dataset_summary.csv 和来源记录。实际帧数与组别分布清楚列出，不硬编码训练比例或种子数量。
+### 2. 跨集合重复与近重复排查
 
-## 使用约定
+检查数据集内部及新旧数据之间是否存在重复构型：
+- 判定重复时必须同时比较：**化学式/元素排序、晶胞/PBC、周期对齐几何（或结构指纹）以及电子状态字段（如 `charge`、`potential`、`spin`）**。
+- 相同几何但处于不同外加电势或电荷态的样本属于不同标签，不可当作重复帧删除。
 
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
+### 3. 防泄漏分组划分（或增量锁定划分）
 
+按目标泛化问题选择 `group_id`（如按轨迹段分组，避免相邻 1 fs 的强相关帧被拆进训练集和测试集造成虚假高精度；具体原则见 [重复、分组与划分](references/splits.md)）：
+- **新建划分**：使用 `sklearn.model_selection.GroupShuffleSplit` 或分层组划分，确保同一 `group_id` 全部落入同一个集合（`train` / `val` / `test` 之一）。
+- **保留旧划分增量扩充**：锁定已有 `val` 和 `test` 成员身份不动，只检查新增数据是否与旧 `val`/`test` 同源或重复（若发生冲突立即报告并给出剔除/归并选项，不悄悄移动旧测试样本）。
+
+### 4. 写出模型输入并回读核验
+
+- 将各集合写出为独立 `extxyz`（如 `train.extxyz`、`val.extxyz`、`test.extxyz`），同时生成全局索引 `split_index.csv` 与字段说明 `schema.json`。
+- 回读检验：
+  1. 确认 `train ∩ val = ∅`、`train ∩ test = ∅`、`val ∩ test = ∅`（无论是 `sample_id` 还是 `group_id` 均零交集）；
+  2. 确认所有字段名、单位与目标训练器（如 `mace_run_train --energy_key=... --forces_key=...`）完全匹配。
+
+## 按需参考
+
+- 防泄漏分组策略、重复识别与增量冲突处理代码：阅读 [重复、分组与划分](references/splits.md)。
+
+## 交付产物与验收
+
+1. **`train.extxyz` / `val.extxyz` / `test.extxyz`**：可直接送入训练的数据文件。
+2. **`split_index.csv`**：`sample_id, source_id, group_id, split, protocol_id`。
+3. **`schema.json`** 与 **`dataset_summary.csv`**：各分集帧数、分组数、元素覆盖、能量/力范围及被排除样本统计。

@@ -1,23 +1,72 @@
 # 调度适配
 
-## Slurm
+## 1. Slurm 模板与常用命令
 
-先读取所在集群的规则。使用 sinfo、squeue、scontrol、sprio 和 sacct 获取当前事实；工具支持 login 参数时，队列与状态查询采用 login=false，减少启动脚本干扰。不要将查询失败解释为没有作业。
+### 标准 Slurm 脚本骨架
+```bash
+#!/usr/bin/env bash
+#SBATCH --job-name=calc_job
+#SBATCH --partition=<partition>
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:4              # 无 GPU 任务请删除此行，按集群真实 GRES 语法修改
+#SBATCH --time=24:00:00
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
 
-资源字段包括 nodes、ntasks、cpus-per-task、GPU 请求、memory 和 time。分区、QoS、账户及 GPU 请求语法取自本地规则。GPU 数与 MPI rank 数相等是部分软件构建的运行配方，不是通用 Slurm 规则。
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
-提交前进入实际计算目录，或显式指定提交和执行目录。Slurm 可从 spool 副本运行脚本，不能仅通过 BASH_SOURCE 推断项目目录；使用明确工作目录或核对 SLURM_SUBMIT_DIR。程序失败须传递为作业退出失败，尤其注意管道和后续 shell 命令覆盖退出码。
+# 环境初始化（按当前集群/项目配置填入）
+# module purge
+# module load ...
 
-afterok 只保证前驱调度作业成功退出。下游依赖科学产物时，用小型验证步骤检查实际所需文件及其有效性。清楚区分数组元素依赖与整个数组依赖。
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
-## PBS
+# 示例启动命令（按实际 MPI 启动器与二进制替换）
+mpirun -np "${SLURM_NTASKS}" <program_cmd> > run.log 2>&1
+```
 
-先识别 PBS 实现及当地语法。qsub、qstat 和资源请求方式按安装版本检查；select/ncpus/ngpus 与 nodes/ppn 不能任意互换。进入 PBS_O_WORKDIR 或明确指定执行位置，并确认 MPI 启动器与分配一致。
+### 常用状态与排查命令
+```bash
+# 查看单个运行中作业的节点、工作目录与标准输出路径
+scontrol show job <job_id>
 
-## 本地执行
+# 查询历史或刚结束作业的退出码、耗时与峰值内存
+sacct -j <job_id> --format=JobID,JobName%20,Partition,State,ExitCode,Elapsed,MaxRSS
 
-没有调度器时，只在用户授权且资源合适的主机上执行。不要将缺少调度器自动等同于可以在登录节点运行重计算。
+# 带依赖提交（前驱成功退出后才启动；数组依赖用 afterok:<job_id> 或 aftercorr:<job_id>）
+jid1=$(sbatch --parsable step1/job.sh)
+jid2=$(sbatch --parsable --dependency=afterok:${jid1} step2/job.sh)
+```
 
-## 提交记录
+- **注意事项**：
+  - Slurm 会把脚本复制到 `/var/spool/slurmd/...` 下执行，**切勿**在 `job.sh` 里用 `dirname "${BASH_SOURCE[0]}"` 来找项目目录，必须用 `$SLURM_SUBMIT_DIR` 或显式 `cd`。
+  - 如果计算目录已有活跃作业或已有未处理完的输出，先核实两者关系再决定是否覆盖或另建目录。
 
-逐项写入任务标识、调度器返回标识、目录、提交时间和输入协议版本。目录已有活动作业或结果时，先核对其关系，避免同一输出被重复写入。取消或替换任务时保留原标识和原因，不把健康作业作为无关排障的牺牲品。
+## 2. PBS / Torque 模板与常用命令
+
+### 标准 PBS 脚本骨架
+```bash
+#!/usr/bin/env bash
+#PBS -N calc_job
+#PBS -q <queue>
+#PBS -l select=1:ncpus=16:mpiprocs=4:ompthreads=4:ngpus=4
+#PBS -l walltime=24:00:00
+#PBS -j oe
+
+set -euo pipefail
+cd "${PBS_O_WORKDIR:-$PWD}"
+
+export OMP_NUM_THREADS=4
+mpirun -np 4 <program_cmd> > run.log 2>&1
+```
+
+- 注意区分 PBS Pro 语法（`select=...:ncpus=...:mpiprocs=...`）与旧版 Torque 语法（`nodes=1:ppn=16`），以集群 `man qsub` 或现有可用模板为准。
+- PBS 带依赖提交：`qsub -W depend=afterok:${jid1} step2/job.sh`。
+
+## 3. 本地执行边界
+
+- 无调度器时，仅在用户明确允许且当前节点资源足够的工作站上直接运行。
+- 登录节点/控制节点通常禁止跑大型 DFT、MD 或模型训练；遇到需要计算资源的测试，默认先写好调度脚本并说明所需资源，再按授权提交。

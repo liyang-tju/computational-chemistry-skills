@@ -1,35 +1,49 @@
 ---
 name: trajectory-analysis
-description: "Analyze molecular and interfacial trajectories for density, orientation, RDF, coordination, hydrogen bonds, RMSD and reaction events. Use shared sampling and uncertainty conventions without conflating distinct observables."
+description: "Analyze MD/AIMD/MLP trajectories for density profiles, water orientation, RDF, coordination numbers, hydrogen bonds, RMSD and reaction events using consistent PBC, time windows and autocorrelation-aware statistics."
 ---
 # 轨迹统计分析
 
-对明确的统计总体计算观测量，保持坐标、分组、时间窗口与误差定义一致。只转换格式时使用轨迹整理流程，不自动展开全套分析。
+在已整理和审计通过的轨迹上计算界面分布、氢键配位、构象 RMSD 与反应事件统计，保持时间窗口、原子选择、周期边界（PBC）与误差口径在所有对比条件间完全一致。纯格式转换、拼接与去重请用 `$trajectory-tools`。
+
+## 开始前确认
+
+- **输入轨迹与元数据**：`extxyz`/轨迹文件、晶胞与时间序列信息（`dt`、有效平衡截断时间 $t_{\text{eq}}$、独立重复 `replica_id` 列表）。
+- **目标观测量与精确定义**：仅运行本次请求的指标（如水密度剖面、$\langle \cos\theta \rangle$ 取向、RDF/CN、氢键数、RMSD 或反应事件统计），不默认全量扫跑无关项目。
+- **对比维度**：不同温度、电势、覆盖度或力场之间使用相同的判据、单位和有效可比窗口。
 
 ## 工作流程
 
-1. 核对轨迹、晶胞、时间、原子身份和必要拓扑，明确源段与独立重复。选择用户指定的有效时间窗口、采样间隔和比较条件。
-2. 定义观测量、单位、原子选择、几何判据和归一化。表面相对位置、固定实验室坐标、固定原子与瞬时分子身份分别说明。
-3. 根据任务只读取所需参考：界面分布、氢键或构象/反应事件；不默认运行所有分析。
-4. 对距离、角度、分子完整性和局域区域使用正确 PBC 与逐帧晶胞。必要时先重建分子或相对表面坐标。
-5. 同时保存足够的逐帧或分块数据，避免只剩总体均值而无法检查变化。多链、多个氧位点和多个重复保留分项数据。
-6. 比较条件时统一定义与可比窗口；不同参考帧、不同轨迹长度或不同初态类别须明确标记。
-7. 统计区分帧波动、时间相关、独立重复和样本不足。进行与问题匹配的分块或窗口敏感性检查，不把长轨迹的帧数当成独立样本数。
-8. 交付数值定义、数据、分析脚本及用户要求的图件。稳定曲线、氢键几何变化与机制证据分别解释。
+### 1. 核对有效窗口与 PBC 完整性
+
+- 确定丢弃的预平衡时长 $t_{\text{eq}}$ 及统计采样区间 $[t_{\text{start}}, t_{\text{end}}]$；确保变胞（NPT）轨迹读取的是**逐帧晶胞**而非首帧晶胞。
+- 在任何矢量计算（O-H 键矢量、水偶极、分子质心）前，必须先基于周期性最小像距（MIC）**重建跨盒断裂的多原子分子**，切勿直接对原始坐标做几何平均。
+
+### 2. 按需加载对应分析协议
+
+根据当前所求物理量只读对应参考文档：
+- **界面密度、水取向与 RDF/配位**：阅读 [界面分布](references/interface.md)。
+- **氢键网络、供受体定义与质子转移重指派**：阅读 [氢键与配位](references/hydrogen-bonds.md)。
+- **RMSD 对齐方式、反应事件驻留时间与误差统计**：阅读 [构象、事件与统计](references/conformation-statistics.md)。
+
+### 3. 保留逐帧与分项中间数据
+
+- 不要只输出一个最终总体均值，应保存**逐帧/逐块序列**及分项数据（例如溶质作为供体 vs 受体、各个氧位点、上/下界面、不同 `replica`），方便事后诊断时间漂移与各重复间一致性。
+- 对密度分布与配位数做基本**积分自洽核对**（如 $\int \rho(z) A_{xy}\,\mathrm{d}z = N_{\text{waters}}$）。
+
+### 4. 计算时间相关修正后的误差
+
+- 分别报告单条轨迹内的分块误差（Block Averaging / 统计无效度 $g$）与多条独立重复（replicas）之间的离散程度，不将总帧数当成独立样本数。
+- 对长度不等的轨迹合并统计时，明确选择“按帧加权”还是“先求各 replica 均值再等权平均”。
 
 ## 按需参考
 
-- 密度、取向与表面参考：读取 [界面分析](references/interface.md)。
-- 氢键与配位：读取 [氢键分析](references/hydrogen-bonds.md)。
-- RMSD、结构事件与误差：读取 [构象和统计](references/conformation-statistics.md)。
+- 相对表面坐标、bin 体积归一化、`cos(theta)` 测度与界面 RDF：阅读 [界面分布](references/interface.md)。
+- 氢键角度两种定义、动态质子归属与归一化分母：阅读 [氢键与配位](references/hydrogen-bonds.md)。
+- 表面对齐 vs 自身对齐 RMSD、事件滞回阈值与分块统计：阅读 [构象、事件与统计](references/conformation-statistics.md)。
 
-## 输出
+## 交付产物与验收
 
-analysis.py、观测量 CSV、定义与采样摘要，以及需要时的分块/重复统计。配置在脚本顶部，已有可靠脚本优先复用并仅做必要适配。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+1. **`analysis.py`**：参数集中于顶部配置区（路径、时间窗、cutoff、bin 宽），可跨条件复用（优先复用项目已有可靠脚本）。
+2. **观测量表与逐帧/分块明细 CSV**：含清晰列名与单位（如 `z_rel_surf_A`, `rho_g_cm3`, `hbonds_per_solute`, `se_block`）。
+3. **`analysis_summary.json`**：记录实际使用的定义公式、截断判据、时间窗口、$N_{\text{frames}}$、$N_{\text{replicas}}$ 及自检积分结果。

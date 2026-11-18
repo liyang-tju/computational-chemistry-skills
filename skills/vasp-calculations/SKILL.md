@@ -1,33 +1,78 @@
 ---
 name: vasp-calculations
-description: "Prepare VASP geometry optimizations, single points and AIMD with explicit scientific settings and compatible restart inputs. Use for VASP input generation and result handoff, not installation or general queue management."
+description: "Prepare VASP geometry optimizations, single-point calculations and AIMD with explicit scientific parameters, POTCAR/KPOINTS checks and compatible restart inputs. Use for VASP input generation and sanity verification; installation and queue management belong to separate skills."
 ---
 # VASP 计算准备
 
-将结构与科学协议整理成可检查的优化、单点或 AIMD 输入。运行环境与并行配方从当前安装和集群配置获取。
+为单点计算、几何优化、AIMD 及约束动力学准备结构、输入文件与重启配置，确保 `POSCAR`、`POTCAR`、`INCAR`、`KPOINTS` 与当前 VASP 二进制版本及科学协议一致。
+
+## 开始前确认
+
+- **任务模式**：单点（`SP`）、离子弛豫（`GEO_OPT`）、晶胞弛豫（`CELL_OPT`）、`AIMD` 或约束动力学。
+- **电子协议**：泛函（如 PBE/RPBE/HSE06）、色散修正（`IVDW`）、赝势变体（如 `PAW_PBE` 及其 `_pv`/`_sv`/`_h` 后缀）、`ENCUT`、`EDIFF`、`ISPIN`、`NELECT`（是否带电）。
+- **体系与边界**：块体、分子还是表面 slab（真空方向、是否开启偶极修正 `LDIPOL`/`IDIPOL`、是否含隐式溶剂如 VASPsol）。
+- **运行资源**：目标二进制（`vasp_std` / `vasp_gam` / `vasp_ncl`）、MPI ranks、GPU 数量与集群推荐并行参数（`KPAR`、`NCORE`）。
 
 ## 工作流程
 
-1. 确认任务模式、目标结构、功能性设置和已有结果。读取当前用户或项目明确的默认值，不能因为参考模板更严格就静默替换精度。
-2. 列出泛函、赝势、截断、k 点、自旋、展宽、色散、溶剂/偶极处理、电子数和约束。区分科学参数与运行资源。
-3. 检查 POSCAR 的元素顺序、计数、晶胞和选择性动力学约束。按明确的赝势选择组装 POTCAR，核对标识、顺序及适配关系；保护既有文件。
-4. 根据模式生成 INCAR/KPOINTS。分阶段优化只在任务需要时使用，明确每一阶段改变的精度及进入下一阶段的规则。
-5. 确认当前二进制支持所需功能，再根据版本、构建与已验证配方设置 GPU/MPI、KPAR、NCORE 等；不将某台机器的布局写死。
-6. 对重启明确几何与电子文件来源、兼容性及读入选项。新输入和旧结果分目录，重新计算范围按用户要求执行。
-7. 核对输入语义、必需文件和脚本语法。提交只在已授权时进行；报告时分别说明准备、启动、电子收敛、离子收敛或 MD 完成。
+### 1. 核对 `POSCAR` 与组装 `POTCAR`
+
+- 检查 `POSCAR` 元素行、原子计数总和、坐标格式（`Direct` vs `Cartesian`）及 `Selective dynamics`（`T/F` 标记）。
+- 若直接从 ASE 导出 `POSCAR`，确认相同元素未被拆成多段或重排，导致与预期 `POTCAR` 顺序错位。
+- 按 `POSCAR` 第 6 行物种顺序拼接 `POTCAR`（仅在计算目录组装本地可用的赝势，严禁将版权赝势内容写入可分享技能仓库），并立即校验：
+
+```bash
+# 核对 POSCAR 物种顺序与 POTCAR TITEL 是否一一对应
+sed -n '6,7p' POSCAR
+grep -E "TITEL|ENMAX|ZVAL" POTCAR
+```
+
+### 2. 配置 `KPOINTS`
+
+- 表面 slab 和孤立分子/团簇在非周期方向 k 点数必须为 `1`（例如 `Nx × Ny × 1` 或纯 Gamma `1 1 1`），优先采用 `Gamma`-centered 网格（六方/表面体系尤其避免用 `Monkhorst-Pack` 破坏对称性）。
+- 仅当计算是 `1 1 1` 单点且无特殊相位需求时，才使用编译版 `vasp_gam`（`Gamma-only`）以加速。
+- `KPOINTS` 写明网格来源或 k-spacing 定义（详见 [输入与运行适配](references/inputs-runtime.md)）。
+
+### 3. 按模式编写 `INCAR`
+
+将科学参数与并行控制参数分块写入 `INCAR`，不同任务模式的常用模板与关键区别见 [计算模式](references/modes.md)：
+
+- **展宽（`ISMEAR` / `SIGMA`）**：
+  - 金属块体/表面优化与能量：可用 `ISMEAR = 1` 或 `2`（`SIGMA = 0.1–0.2`），最后高精度单点/DOS 可切至 `ISMEAR = -5`（需 k 网格 $\ge 4$ 点且仅用于静态单点）。
+  - 分子、半导体、绝缘体或气相参考物种：**必须用 `ISMEAR = 0`（Gaussian）** 且较小 `SIGMA = 0.02–0.05`，避免分数占据误差。
+- **实空间投影（`LREAL`）**：小体系（< ~20 原子）与高精度能量对比用 `LREAL = .FALSE.`；大超胞界面或 AIMD 可用 `LREAL = Auto`（需在同一批对比计算中保持一致）。
+- **净电荷与电化学**：设置 `NELECT` 时需由中性体系价电子总数 `sum(N_i * ZVAL_i)` 加减净电荷（多电子为正加、少电子为负减），并明确背景补偿电荷或隐式溶剂定义。
+
+### 4. 设置并行与重启兼容
+
+- **并行参数**：`KPAR` 必须能整除 MPI 总进程数及不可约 k 点数；CPU 运行常设 `NCORE`（如单节点核心数的因子），GPU（OpenACC）版本按当前集群已验证配方设置（通常不设或按 GPU 数调优）。
+- **重启控制**：
+  - 几何续算：复制完整 `CONTCAR` 为新目录的 `POSCAR`（先检查非空、原子数与 `Selective dynamics` 未丢）。
+  - 电子续算：`ISTART = 1` 读 `WAVECAR`，`ICHARG = 1` 读 `CHGCAR`；仅当原子数、晶胞体积（截断能对应平面波基组）、k 点网格、旋量/共线（`ISPIN`/`LNONCOLLINEAR`）一致时才可复用，否则设为 `ISTART = 0` 重新初始化。
+
+### 5. 静态检查与结果验收
+
+提交前检查：
+```bash
+# 确认 4 个必需输入齐备且 POSCAR 原子总数与坐标行数匹配
+ls -l INCAR POSCAR POTCAR KPOINTS
+python3 -c '
+from ase.io import read
+a = read("POSCAR")
+print("natoms:", len(a), "formula:", a.get_chemical_formula(), "pbc:", a.pbc)
+'
+```
+运行后验收必须分别核对：
+1. 正常结束标记：`grep -q "General timing" OUTCAR`；
+2. 电子步是否真正收敛（不能只看任务退出码为 0）：检查每离子步电子迭代次数是否触及 `NELM` 上限；
+3. 离子优化/MD 是否达到目标判据（自由原子最大力 vs `|EDIFFG|`，或实际完成的 `NSW` 步数）。
 
 ## 按需参考
 
-- 单点、优化和 AIMD 的区别：读取 [计算模式](references/modes.md)。
-- 赝势、k 点与并行设置：读取 [输入与运行适配](references/inputs-runtime.md)。
+- 单点、优化、AIMD 与约束动力学的参数模板及能量读取口径：阅读 [计算模式](references/modes.md)。
+- `POTCAR`、k 点 spacing 约定、`GPU/MPI` 适配与重启边界：阅读 [输入与运行适配](references/inputs-runtime.md)。
 
-## 输出
+## 交付产物与验收
 
-POSCAR、INCAR、KPOINTS、必要的本地 POTCAR、作业脚本及参数说明。赝势文件不进入公开技能包；只有用户需要的计算目录才包含合法可用的赝势数据。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+- 独立计算目录内的 `POSCAR`、`INCAR`、`KPOINTS`、本地组装 `POTCAR`、作业脚本及 `protocol_notes.md`。
+- 新协议或重启任务使用新目录，不直接覆盖原始运行输入和日志。

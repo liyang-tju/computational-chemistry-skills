@@ -1,33 +1,82 @@
 ---
 name: trajectory-tools
-description: "Convert, inspect, extract and join atomistic trajectories while preserving cells, time, atom identity and provenance. Use for VASP, CP2K, LAMMPS and ASE-readable formats; observable statistics belong to trajectory analysis."
+description: "Convert, inspect, extract and join VASP, CP2K, LAMMPS, GROMACS and extxyz trajectories using ASE while preserving cell, PBC, step/time metadata and atom provenance. Use for trajectory I/O and preprocessing; statistical observables belong to trajectory-analysis."
 ---
 # 轨迹整理与转换
 
-把结构和轨迹整理成保留物理信息的分析输入，优先使用 ASE Atoms 作为内存表示。统计观测量由对应分析流程完成。
+将来自 VASP、CP2K、LAMMPS、GROMACS 等引擎的结构与轨迹整理为标准化分析或标注输入（优先采用 ASE `extxyz`），完整保留晶胞、PBC、原子身份、步号/时间及来源索引。本技能负责格式转换、清洗、抽帧和分段拼接；统计观测量交由 `$trajectory-analysis`。
+
+## 开始前确认
+
+- **输入源与伴随文件**：轨迹文件及其必需的拓扑/晶胞/时间伴随文件（如 CP2K 的 `.cell` 与 `.ener`、LAMMPS 的 `data` 或 `type->element` 映射、GROMACS 的 `.gro`/`.tpr`、VASP 的 `POSCAR`/`INCAR` `POTIM`）。
+- **目标用途**：
+  1. **保留标签的数据集**（留存能量、力、应力）；
+  2. **待 DFT 标注结构**（剥离旧预测能量/力，保留电子态与约束）；
+  3. **MD 新初态**（明确是否清除速度，保留晶胞与约束）。
 
 ## 工作流程
 
-1. 识别格式及伴随文件：轨迹、拓扑、晶胞、原子类型表和时间步信息。扩展名不足以确定文件包含哪些物理量。
-2. 明确原子身份、元素、顺序、PBC、长度与时间单位、帧号和实际步数。文件中的 frame_index 与 simulation_step 分别保存。
-3. 对大轨迹优先流式读取。检查完整帧、有限坐标、合法晶胞与逐段时间变化；保留未完整写出的尾部并报告，不能静默解释成正常末帧。
-4. 抽帧按明示时间或步数执行，写出源文件与源帧映射。缺少时间信息时保留未知，不凭帧数猜测物理时长。
-5. 拼接续算采用已确定的检查点边界；相同结构不自动等于重复时间帧。独立重复轨迹保留 replica 标签，不伪装成连续时间序列。
-6. 将转换输出重新读取，核对原子数、元素顺序、晶胞、PBC、所需约束及代表帧的坐标。
-7. 明确输出是完整带标签数据、待标注几何还是 MD 初态；只对新副本去掉不适用的能量、力和计算器缓存。
+### 1. 盘点格式与物理信息
+
+不能只看文件扩展名。先检查第一帧与配套日志，核对：
+- 原子总数与元素顺序（LAMMPS dump 若无 `element` 列，必须提供整数 `type -> element` 映射）；
+- 晶胞是否随时间变化（NPT/变胞轨迹绝对不能整条沿用首帧晶胞）；
+- 时间步长与输出间隔（计算 `time = simulation_step * dt`，区分 `frame_index` 与 `simulation_step`；缺少时间信息时保留 `None`/`NaN`，不凭帧数猜时长）。
+
+### 2. 流式读取与完整性检验
+
+对大轨迹使用 `ase.io.iread` 流式迭代，避免一次性爆内存，同时捕获异常截断尾帧并校验坐标有限性：
+
+```python
+import numpy as np
+from ase.io import iread
+
+frames = []
+broken_tail = False
+it = iread("traj.xyz", index=":")
+for idx, atoms in enumerate(it):
+    try:
+        if not np.all(np.isfinite(atoms.positions)):
+            raise ValueError(f"Frame {idx} contains NaN/Inf positions")
+        frames.append(atoms)
+    except Exception as exc:
+        print(f"Stopped at frame {idx}: {exc}")
+        broken_tail = True
+        break
+```
+
+### 3. 抽帧、分段拼接与去重
+
+- **按步号/时间抽帧**：按明确的时间窗或间隔抽取（如每 `stride` ps），导出 `frame_index.csv` 记录每一帧的 `source_id`、`source_frame`、`simulation_step` 与 `time`。
+- **拼接续算段**：依据 `$simulation-audit-restart` 确定的检查点边界 `checkpoint_step` 截断父段尾部，再衔接子段 `step > checkpoint_step`；若需合并多条独立重复（replicas），必须保留 `replica_id` 列，不能拼成假连续时间轴。
+
+### 4. 按目标用途处理标签与状态（仅在新副本操作）
+
+写出前按需求决定保留或剥离哪些字段（详见 [数据表示与元数据](references/metadata.md)）：
+- 清理 ASE 旧计算器缓存务必使用 `atoms.calc = None`，并同步清理不再适用的 `atoms.info`（如 `energy`, `free_energy`, `stress`）与 `atoms.arrays`（如 `forces`, `momenta`）。
+
+### 5. 写出并回读抽检
+
+写出 `extxyz` 等目标格式后，必须重新读回代表帧（首帧、中帧、末帧）核对原子数、元素顺序、晶胞、PBC 与约束语义（如 `FixAtoms`）未损坏：
+
+```python
+from ase.io import read, write
+
+write("out.extxyz", frames, format="extxyz")
+check_first = read("out.extxyz", index=0)
+check_last = read("out.extxyz", index=-1)
+assert len(check_first) == len(frames[0])
+assert check_first.get_chemical_symbols() == frames[0].get_chemical_symbols()
+assert np.allclose(check_first.cell.array, frames[0].cell.array)
+```
 
 ## 按需参考
 
-- 格式伴随文件与边界情况：读取 [格式适配](references/formats.md)。
-- 标注、初态和来源字段：读取 [数据表示](references/metadata.md)。
+- VASP / CP2K / LAMMPS / GROMACS / `extxyz` 格式边界与解析技巧：阅读 [格式适配](references/formats.md)。
+- `frame_index.csv` 字段、标签清理代码与状态保留规则：阅读 [数据表示与元数据](references/metadata.md)。
 
-## 输出
+## 交付产物与验收
 
-结构或轨迹文件、frame_index.csv，以及必要时的 conversion.json。CSV 使用数据集内相对路径或逻辑 source_id；需要保存本机绝对位置时写入独立的本地运行记录。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+1. 转换后的结构/轨迹文件（如 `*.extxyz`）。
+2. **`frame_index.csv`**：每帧对应 `source_id, relative_path, source_frame, simulation_step, time, time_unit, segment_id, replica_id`。
+3. **`conversion.json`**：记录源文件列表、类型映射、截断/去重统计及回读校验结果。

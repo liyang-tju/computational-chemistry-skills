@@ -1,23 +1,52 @@
 # 检查点与时间衔接
 
-## VASP
+## 1. VASP 检查点核对
 
-区分几何优化恢复与 MD 连续重启。CONTCAR 必须可完整读取且结构合理；MD 续算还要核对速度及所需热浴状态是否存在、格式是否适用。仅有坐标的新初态应标记为重新初始化，不能宣称保持原动力学状态。
+- **几何与速度（`CONTCAR`）**：
+  - 确认 `CONTCAR` 非空且能被 ASE 完整读入；核对原子数、晶胞及 `Selective dynamics` 标志未丢失。
+  - MD 续算时检查 `CONTCAR` 坐标块下方是否存在完整速度块；若速度缺失，重新生成温度必须明确标记为新初始化段（不能宣称延续原相空间轨迹）。
+- **电子波函数与电荷（`WAVECAR` / `CHGCAR`）**：
+  - 仅在原子数、晶胞、`ENCUT`、k 点、`ISPIN` 和 `LNONCOLLINEAR` 兼容时才用 `ISTART = 1` / `ICHARG = 1`。更换体系或明显改变电子协议时请设 `ISTART = 0`。
+- **安全停止（`STOPCAR`）**：
+  - 需提前优雅结束运行中的作业时，写入 `LSTOP = .TRUE.` 使当前离子步完成后写出完整 `CONTCAR`/`WAVECAR`；随后仍需验证实际退出日志和末结构完整性。
 
-WAVECAR/CHGCAR 的可用性取决于实际电子态与读取设置；核对原子、晶胞、k 点、旋量、能带及相关版本要求。改变化学组成或电子协议不能自动沿用电子重启。数值爆炸后的最后结构可能失真，应选择较早可靠状态或已验证的初始结构，并注明恢复起点。
+```bash
+# 快速检查 VASP 计算目录健康状态
+python3 - <<'EOF'
+from pathlib import Path
+from ase.io import read
 
-若用户要求正常停止，按安装版本使用 STOPCAR 的适当语义，并继续核对实际退出和产物；请求停止不等于已停止。
+outcar = Path("OUTCAR")
+contcar = Path("CONTCAR")
+text = outcar.read_text(errors="ignore") if outcar.exists() else ""
+print("Normal finish:", "General timing" in text)
+print("Ionic converged:", "reached required accuracy" in text)
+if contcar.exists() and contcar.stat().st_size > 0:
+    a = read(contcar)
+    print("CONTCAR natoms:", len(a))
+else:
+    print("CONTCAR empty or missing")
+EOF
+```
 
-## CP2K
+## 2. CP2K 检查点核对
 
-选择完整、互相匹配的 restart 与波函数文件，核对 PROJECT、坐标、速度、晶胞、MD 步数和时间，以及温控/压控状态。EXT_RESTART 的保留或重置项取决于继续同一轨迹还是切换状态。
+- **匹配文件**：确认最新的 `*-1.restart`（或指定备份 `*-1.restart.bak-*`）与 `*-RESTART.wfn` 完整可读。
+- **步数与时间语义**：
+  - 检查 `*-1.restart` 中 `&MD / STEP_START_VAL` 与 `&GLOBAL / RUN_TYPE`、以及 `*-1.ener` 和 `*-pos-1.xyz` 的最后完整步号。
+  - 在新目录使用 `&EXT_RESTART` 时：延续同一轨迹保持 `RESTART_POS .TRUE.`、`RESTART_VEL .TRUE.`、`RESTART_THERMOSTAT .TRUE.`、`RESTART_COUNTERS .TRUE.`（如为 NPT 再加 `RESTART_CELL .TRUE.` 和 `RESTART_BAROSTAT .TRUE.`）；若切换温度或热浴协议，关闭对应 `RESTART_THERMOSTAT` 并另记新段。
+- **容差匹配与尾帧清理**：CP2K 各输出文件写出的浮点时间可能略有舍入，比较时间时用容差（如 `abs(t1 - t2) < 1e-4`）。父段崩溃后 `pos-1.xyz` 末尾若有半帧（行数不足 `natoms + 2`），应在解析合并时丢弃该半帧，保留到最近一个完整 `restart` 步号为止。
 
-浮点时间匹配使用符合文件精度的容差，不用字符串相等或精确浮点相等。restart 之后旧输出可能还有完整或不完整的尾帧，分析拼接以实际恢复点为界，不能仅按文件修改时间拼接。
+## 3. LAMMPS 检查点核对
 
-## LAMMPS
+- **二进制 `restart` vs `data`**：
+  - `read_restart` 可恢复原子坐标、速度、image flags、当前 `timestep` 及部分 `fix` 状态（如 `nvt`/`npt` 积分器变量，视具体 LAMMPS 版本文档而定）。
+  - `write_data`/`read_data` 不保存多数 `fix` 的内部累积状态与偏置历史。
+- **必须重新声明的命令**：即使使用 `read_restart`，输入脚本中仍须重新指定 `fix`（如 `shake`、`nvt`/`npt`、`setforce`、`electrode`）、`dump`、`thermo` 以及不写入 restart 的势函数参数。
+- **步数目标**：检查 `log.lammps` 的最后有效步号 $S_0$；使用 `run <S_target> upto` 可避免手算剩余步数出错。
 
-区分二进制 restart 与 data 文件；data 通常不保留全部动力学或 fix 内部状态。检查版本、编译包、atom_style、势函数与所需 fix 的重启支持。重新定义 restart 未持久化的参数，并核对当前 step 与 run 的相对/绝对目标语义。
+## 4. 增强采样联合续算
 
-## 增强采样
-
-MD 检查点与偏置状态必须在时间和定义上匹配。核对 CV 原子组、单位、核文件或历史偏置、步号及温度。新模拟不能携带旧偏置伪装成 fresh run；恢复偏置也不能只恢复几何。
+对于 MD + PLUMED（如 OPES/Metadynamics）续算，**MD 检查点与偏置状态必须严格对齐**：
+- 确认 `COLVAR`、`KERNELS`/`HILLS` 及 OPES `STATE` 文件最后写入的 `time` 与 MD 检查点一致。
+- 续算时必须在 `plumed.dat` 中启用 `RESTART=YES`（OPES 配合 `STATE_RFILE=...`），保持相同的 `UNITS`、CV 原子索引和参数；开启全新采样则务必移除旧 `KERNELS`/`STATE` 并关闭 `RESTART`。

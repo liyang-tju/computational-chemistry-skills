@@ -1,23 +1,53 @@
 # 格式适配
 
-## VASP
+## 1. VASP (`XDATCAR` / `OUTCAR` / `vasprun.xml`)
 
-结合 POSCAR/CONTCAR、XDATCAR 和相关日志判断元素、晶胞、时间步与输出间隔。确认读取器是否支持该文件实际的变胞写法；不要给变胞轨迹机械套用首帧晶胞。
+- **`XDATCAR` 变胞与步号**：NPT（`ISIF=3`）的 `XDATCAR` 每帧都会写出新晶胞，而固定晶胞（`ISIF=2`）只在文件头写一次晶胞。用 ASE 读取旧版或特殊格式 `XDATCAR` 时，务必回读验证第 1 帧和第 $N$ 帧晶胞是否与预期（变胞 vs 固定）一致；如需同时读取能量/力，优先读取完整的 `OUTCAR` 或 `vasprun.xml`。
+- **时间还原**：`XDATCAR` 本身不包含时间步 `POTIM` 与输出间隔 `NBLOCK`，必须从同目录 `INCAR`/`OUTCAR` 读出 `POTIM`（fs）与 `NBLOCK` 后计算 `time = step * POTIM`。
 
-## CP2K
+## 2. CP2K (`*-pos-1.xyz` + `*-1.cell` + `*-1.ener`)
 
-普通 XYZ 轨迹通常需配套 CELL 文件及步号/时间元数据。通过步号或时间匹配，不能假定两个文件始终逐行对应。明确头部、重复段和不同输出步长；缺失对应晶胞时报告缺失，不默认前向填充。只对数字字段处理 Fortran D 指数，避免全文件替换破坏元素或注释。
+CP2K 轨迹默认把坐标、晶胞和能量分开存放，且不同 `&EACH` 频率或崩溃中断会导致行号不对应。
 
-## LAMMPS
+- **按步号精确对齐**：从 `.xyz` 注释行解析 `i = <step>, time = <t>`，以整数 `step`（或容差匹配 `time`）对齐 `.cell` 的 `Step` 列：
 
-dump 的 type 需要显式元素映射或匹配拓扑；整数类型本身不包含元素信息。依据 id 对齐原子身份，处理 triclinic box、倾斜参数及坐标表示。区分 x/y/z、xs/ys/zs、xu/yu/zu 与 image flags，不对已 unwrapped 的坐标重复解包。
+```python
+import re
+import numpy as np
 
-## GROMACS 与其他格式
+# 读取 .cell 文件建立 step -> 3x3 cell_vectors (Å)
+cell_by_step = {}
+with open("proj-1.cell") as f:
+    for line in f:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split()
+        step = int(parts[0])
+        # CP2K .cell 列顺序: Step, Time[fs], Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz, Vol
+        vec = np.array([float(x) for x in parts[2:11]]).reshape(3, 3)
+        cell_by_step[step] = vec
+```
 
-TRR/XTC 通常需匹配拓扑文件；确认读取库使用的单位及转换行为。PDB、XYZ 的连接、晶胞和电荷信息可能不足；不能凭格式名称宣称所有信息完整。
+- **Fortran `D` 科学计数法**：旧版 CP2K 或部分辅助输出可能出现 `1.234D-05`；若需预处理数字，仅对数字正则 `r"([+-]?(?:\d+\.?\d*|\.\d+))[Dd]([+-]?\d+)"` 替换为 `\1E\2`，切勿全文件暴力替换 `D`，以免误伤元素 `Dy` 或注释文本。
+- **缺失晶胞处理**：若某步在 `.cell` 中缺失，应显式记录缺失或剔除该帧，不要静默前向填充。
 
-## ASE extxyz
+## 3. LAMMPS (`dump` / `lammpstrj` + `data`)
 
-写出并读回代表帧，检查 lattice、PBC、arrays、info 及约束。FixAtoms 可能通过 move_mask 序列化，再被读取成 constraints；语义保留即可，不要求它始终位于同一对象字段。
+- **元素映射**：若 dump 仅含 `type` 整数列，需传入 `specorder` 或映射字典（如 `{1: "Pt", 2: "O", 3: "H"}`）；确保按原子 `id` 排序（或用 `ase.io.read(..., format="lammps-dump-text", specorder=...)` 自动按 id 排序）。
+- **坐标类型与周期包裹**：检查 dump `ITEM: ATOMS` 列头：
+  - `x y z`：包裹后的笛卡尔坐标；
+  - `xs ys zs`：分数坐标（`[0, 1]`）；
+  - `xu yu zu`：已解包（unwrapped）坐标（不能再做一次周期解包！）；
+  - 若带 `ix iy iz` image flags，可根据需要结合晶胞矩阵还原连续轨迹用于扩散分析。
+- **三斜盒（Triclinic Box）**：`ITEM: BOX BOUNDS xy xz yz` 给出的 `xlo_bound xhi_bound` 含倾斜偏移量（与正交盒不同），建议直接交由 ASE/MDAnalysis 解析而非手工硬切边界值。
 
-可视化工具的解析成功、显示成功和用户实际看到的界面是不同层次；仅验证解析时明确报告范围。
+## 4. GROMACS (`.xtc` / `.trr` + `.gro` / `.tpr`)
+
+- 压缩轨迹 `.xtc`/`.trr` 不含元素/拓扑，需配合 `.gro`/`.pdb`/`.tpr` 读取。
+- **单位陷阱**：GROMACS 原生单位为 **nm** 与 **ps**（力和能量用 kJ/mol/nm 与 kJ/mol），而 ASE 默认 **Å** 与 **eV**；使用 `MDAnalysis`（默认 Å）与 `mdtraj`（默认 nm）混用时务必核对坐标与盒长量纲。
+
+## 5. ASE `extxyz` 约束与可视化
+
+- `FixAtoms` 写出到 `extxyz` 时常以 `move_mask` 布尔数组序列化到原子列中，读回时 ASE 自动还原为 `atoms.constraints` 中的 `FixAtoms`；验证时检查 `atoms.constraints` 行为等价即可。
+- 涉及大批量可视化核查时，区分“解析无报错”与“人工查看图像渲染无异常”，不将前者替代后者。

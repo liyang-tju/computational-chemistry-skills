@@ -1,34 +1,70 @@
 ---
 name: hpc-job-management
-description: "Prepare scheduler jobs, inspect queues and dependencies, and measure progress on Slurm or PBS. Use for resource and execution management; scientific completion and restart selection belong to simulation auditing."
+description: "Prepare Slurm or PBS job scripts, inspect partitions/queues, manage job dependencies and track execution progress. Use for resource layout and scheduling; scientific convergence auditing belongs to simulation-audit-restart."
 ---
 # 集群作业管理
 
-将已明确的计算计划转换为适配当前集群的执行方案。只查询队列时，不启动输入重写或故障恢复流程。
+将计算任务转换为适配当前集群的 Slurm / PBS 作业脚本与依赖工作流，并准确查询队列状态与吞吐速率。仅查询队列或资源状态时，只执行只读命令，不修改任何计算输入。
+
+## 开始前确认
+
+- **调度器与目标分区**：Slurm 还是 PBS、分区/队列名称（`partition`/`queue`）、账户（`account`）与 QoS。
+- **资源配置**：节点数（`nodes`）、总 MPI 进程数（`ntasks`）、每任务 CPU 核心数（`cpus-per-task`）、GPU 型号与卡数（`gres=gpu:...`）、内存（`mem`）和墙钟时限（`time`）。
+- **运行命令与环境**：实际要激活的 conda/module 环境与可执行程序启动命令（由本地项目配置或当前环境探测获取）。
+- **执行授权**：明确当前任务是**仅准备脚本**，还是**已授权提交/取消作业**。
 
 ## 工作流程
 
-1. 识别调度器、用户请求的资源及已有可靠作业模板。读取适用的集群说明，并查询当前分区、队列和限制；历史节点状态仅供定位线索。
-2. 分开记录任务数量、每任务资源和实际并发度。核对节点数、MPI ranks、每 rank CPU、线程数、GPU 数与启动命令的关系，不假定各引擎采用相同布局。
-3. 在计算目录准备最小脚本。明确工作目录、程序命令、环境初始化、输出和错误日志；验证必需文件与 shell 语法。
-4. 分阶段任务先确定科学依赖与验收产物，再选择调度依赖。上游退出成功并不保证下游所需的模型或检查点可用。
-5. 获得提交授权后才提交，立即记录任务标识、工作目录、资源与提交时间。批次中断后利用这份记录避免重复提交。
-6. 查询时区分排队、执行、进程退出和科学完成。估算速度采用有实际进展的时间窗口，说明预热、SCF 波动与排队时间是否计入。
+### 1. 探测集群资源与当前队列（只读）
+
+先核对实际分区限制和当前排队状态，不盲目套用其他机器的分区名或 GPU 语法：
+
+```bash
+# Slurm：查看可用分区、节点状态与个人作业
+sinfo -o "%P %a %l %D %t %G"
+squeue -u "$USER" -o "%.12i %.9P %.20j %.8T %.10M %.6D %R"
+
+# PBS：查看队列与个人作业
+qstat -q
+qstat -u "$USER"
+```
+
+### 2. 核对 MPI / 线程 / GPU 布局
+
+分开明确以下四项参数并核对乘积关系，防止超配或只跑单核：
+
+- `nodes × ntasks_per_node = total_mpi_ranks`
+- `ntasks_per_node × cpus_per_task ≤ 单节点物理 CPU 核心数`
+- `OMP_NUM_THREADS` 一般设为 `$SLURM_CPUS_PER_TASK`（或由目标程序要求固定为 `1`）
+- GPU 绑定：仅当目标程序和集群已验证“1 GPU 对应 1 MPI rank”或特定绑定时才采用对应布局，不跨软件硬套。
+
+### 3. 编写健壮的作业脚本并静态校验
+
+在目标计算目录下写入 `job.sh`（具体 Slurm/PBS 模板见 [调度适配](references/schedulers.md)），必须包含：
+1. 明确进入提交/计算目录（`cd "${SLURM_SUBMIT_DIR:-$PWD}"` 或 `cd "${PBS_O_WORKDIR:-$PWD}"`），避免 Slurm 从 spool 副本运行时找不到相对路径；
+2. 启用 `set -euo pipefail` 或显式传递程序退出码（防止后处理命令覆盖主计算报错的退出码）；
+3. 清晰的 `stdout`/`stderr` 日志文件名与环境变量设置。
+
+检查脚本语法与目标输入文件是否就绪：
+```bash
+bash -n job.sh
+```
+
+### 4. 处理分阶段依赖与防重复提交
+
+- 提交多阶段任务时使用调度器依赖（如 Slurm `sbatch --dependency=afterok:<job_id>`）。注意：`afterok` 仅说明前驱作业退出码为 0，下游脚本开头应先校验关键产物（如 `CONTCAR` 非空、`.restart` 存在）后再启动计算。
+- 已授权提交后立即记录到 `jobs.csv`（至少包含 `task_id,job_id,workdir,scheduler,state,submitted_at`），批量任务中断重跑时先检查 `jobs.csv` 与 `squeue`，避免对同一计算目录重复提交写花输出。
+
+### 5. 查询进度与计算吞吐率
+
+查询时明确区分**排队（`PENDING`）**、**运行（`RUNNING`）**、**进程正常退出（`COMPLETED`）**与**科学目标完成**（后者交由 `$simulation-audit-restart` 判定）。吞吐量（`s/step`、`ns/day`）按 [监控与吞吐量](references/monitoring.md) 从有效连续进展窗口计算。
 
 ## 按需参考
 
-- Slurm、PBS、依赖关系与提交目录：读取 [调度适配](references/schedulers.md)。
-- 持续监控与性能比较：读取 [监控与吞吐量](references/monitoring.md)。
+- Slurm / PBS 作业脚本模板、常用诊断命令与依赖语法：阅读 [调度适配](references/schedulers.md)。
+- 作业进度报告、批量轮询约束与吞吐量换算：阅读 [监控与吞吐量](references/monitoring.md)。
 
-## 输出
+## 交付产物与验收
 
-按任务需要交付 job.sh、jobs.csv 和简短的资源说明。jobs.csv 至少保留 task_id、job_id、workdir、scheduler、state、observed_at；仅查询时直接报告结果即可，无需强制生成文件。
-
-不要用休眠占卡作业假装为后续大作业预留资源；不要把节点故障一次性观察固化成永久黑名单。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+- 仅查询队列时：直接输出当前状态汇总表（含观察时间与命令证据）。
+- 准备/提交作业时：交付 `job.sh`、`jobs.csv`（或提交记录），并通过 `bash -n job.sh` 语法检查；禁止提交占卡空跑脚本来“占位”。

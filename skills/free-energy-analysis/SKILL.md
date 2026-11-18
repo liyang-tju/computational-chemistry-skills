@@ -1,33 +1,59 @@
 ---
 name: free-energy-analysis
-description: "Analyze constrained mean forces, umbrella or OPES sampling, compare PMFs and construct CHE reaction diagrams. Route methods separately and preserve bias, reference-state and uncertainty conventions."
+description: "Reconstruct PMFs and free energy profiles from constrained MD (Blue Moon), umbrella sampling (WHAM/MBAR) or OPES/Metadynamics, evaluate autocorrelation/block uncertainties and build CHE reaction diagrams."
 ---
 # 自由能分析
 
-先识别数据属于哪一种采样和热力学定义，再选择重建方法。现有 PMF 直接比较时，先复用其已知定义，不擅自重新处理原始采样。
+识别采样类型与热力学定义后，使用匹配的统计力学估计器重建自由能面（PMF）、估计自相关修正误差或构建计算氢电极（CHE）反应能量图。若任务仅是直接比较已计算好的 PMF 文件，则直接复用已有 PMF 定义而不重跑上游重建。
+
+## 开始前确认
+
+- **采样类型与数据**：
+  - 约束动力学 / 慢增长（VASP `REPORT` / CP2K `.lagrange_mult`）；
+  - 伞形采样（各窗口 `COLVAR`、中心 $\xi_0$、弹簧常数 $k$ 及其是否有 $1/2$ 系数、温度）；
+  - OPES / Metadynamics（`COLVAR` 含 `opes.bias`/`metad.bias`、`STATE`/`KERNELS`、`rct`）；
+  - 或已算好的单点/自由能表构建 CHE 图。
+- **物理与参考约定**：温度 $T$、pH / 电势标尺（SHE vs RHE）、CV 坐标定义、比较区间与零点参考态（反应物盆地、体相自由态还是干净表面）。
 
 ## 工作流程
 
-1. 明确采样方法、温度、系综、反应坐标、偏置或约束定义，以及所求量是 PMF、相对态自由能还是电势相关反应图。
-2. 检查窗口、重复、轨迹段与时间索引。明确平衡段、有效采样、共同比较区间和缺失窗口。
-3. 依据方法读取 [重建与修正](references/estimators.md)，保留力符号、偏置单位、CV 度量和必要修正。
-4. 先检查覆盖、相邻窗口重叠、迟滞、有效样本数和时间稳定性，再给出曲线。缺乏重叠或发生旁路反应时明确限制，不强行平滑成可信曲线。
-5. 比较曲线时采用明确的参考态和零点规则；不要分别按最小值对齐后仍解释绝对态差。
-6. 误差估计考虑时间相关和独立重复。存在足够数据时使用分块、独立重复或适用的重采样；少数温度点不能支撑无依据的统计精度。
-7. 输出数据与方法说明后再绘图，注明能垒对应哪一个反应物盆地和过渡区域。
+### 1. 核对时间序列、单位与采样窗口
+
+- 清理断续段并对齐时间轴；按能量、CV 及偏置时间序列截去初始平衡段（equilibration discard）。
+- 检查各窗口/全轨迹是否存在**非预期旁路反应**或脱附，若部分窗口采样偏离反应通道，明确标识限制而非强行插值掩盖。
+
+### 2. 先做覆盖与重叠诊断，再出曲线
+
+| 方法 | 重建前必查诊断 |
+|---|---|
+| **约束平均力（TI / Blue Moon）** | 每窗口约束力 $\langle \lambda \rangle$ 时间稳定性、窗口间距无大缺口、符号（$\partial F/\partial\xi$ vs $-\partial F/\partial\xi$）与度量修正 |
+| **伞形采样（WHAM / MBAR）** | 相邻窗口直方图**重叠度**（建议相邻重叠 $\ge 5\%\text{–}10\%$）、窗口连通性、各窗口有效样本数 $N_{\text{eff}}$ |
+| **OPES / Metadynamics** | 偏置准静态化时刻（如 OPES `zed` / `rct` 稳定期）、双向往返次数（recrossings）、偏置与能量单位统一（$k_B T$） |
+
+### 3. 执行匹配的自由能重建
+
+按 [重建方法与修正](references/estimators.md) 执行对应积分或重加权，务必明确：
+- 弹簧势公式是否含 $1/2$（PLUMED `RESTRAINT KAPPA` 定义为 $\frac{1}{2}\kappa(s - s_0)^2$，而部分程序不带 $1/2$）；
+- 距离类 CV 是否涉及径向熵/雅可比修正（如二维/三维距离自由能 $w(r) = \text{PMF}_{\text{1D}}(r) + (d-1)k_B T \ln r$）；
+- 不同条件对比时使用**统一的参考盆地积分或固定参考点**对齐，不要各自把最低点归零后还直接断言绝对态自由能差。
+
+### 4. 计算自相关修正误差
+
+相邻 MD 帧高度时间相关，**绝对不能把总帧数当独立样本数**来算 $\sigma/\sqrt{N}$：
+- 使用统计无效度 $g = 1 + 2\tau_{\text{int}}$（如 `pymbar.timeseries.statistical_inefficiency`）或**分块平均（Block Averaging）**检查块误差随块长收敛平台；
+- 有独立重复（replicas）时，同时给出重复间标准差/标准误；报告时清楚注明误差定义（SD / SE / 95% CI / replica spread）。
+
+### 5. 构建热力学 / CHE 图与交付
+
+若涉及电化学反应自由能图或温度依赖焓熵分解，遵循 [参考态与比较](references/thermodynamics.md) 明确 $eU$ 符号、RHE/SHE 换算与标准态修正，然后输出数据表后再转入 `$scientific-figures` 绘图。
 
 ## 按需参考
 
-- 约束力、umbrella、OPES：读取 [重建与修正](references/estimators.md)。
-- CHE、电势和温度比较：读取 [参考态](references/thermodynamics.md)。
+- Blue Moon 积分、PLUMED/MBAR 重加权公式、OPES 归一化与自相关误差代码：阅读 [重建方法与修正](references/estimators.md)。
+- CHE 电化学台阶图公式、RHE/SHE 标尺与双温度焓熵分解陷阱：阅读 [参考态与比较](references/thermodynamics.md)。
 
-## 输出
+## 交付产物与验收
 
-自由能表、采样/重叠诊断、误差或数据不足说明、分析脚本和图件所需数据。不同方法不共享未经推导的修正项或重加权公式。
-
-## 使用约定
-
-- 依赖路径、环境名称、调度资源和科学参数从当前请求、项目文件或运行配置获取；只读探测缺失的环境信息，关键科学选择不明确时再询问。
-- 保留源数据与既有结果，使用新的输出位置；提交、取消作业或破坏性操作须在当前授权范围内进行。准备输入本身不等于授权提交。
-- 生成的脚本采用顶部配置、清楚的输入输出和相对资源引用。当前运行的本机路径可以记录在运行产物中，不回写到可分享的技能文件。
-
+1. **`pmf.csv`**（或 **`che_profile.csv`**）：包含坐标网格、自由能均值、误差列、样本数 $N_{\text{eff}}$ 与参考零点说明。
+2. **`diagnostics.csv`**：分窗口均值、重叠指标、自相关时间 $\tau_{\text{int}}$ 与分块误差收敛表。
+3. **`reconstruct.py`**：完整可复现重建脚本及方法/限制说明。
