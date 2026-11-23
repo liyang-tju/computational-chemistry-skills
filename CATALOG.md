@@ -1,6 +1,6 @@
 # 通用计算化学与材料模拟 Skills
 
-这套技能按任务组织，包含 14 个独立技能。每个目录提供 SKILL.md、按需参考文档和界面元数据；可以单独复制使用，不要求其他技能目录同时存在。
+这套技能按任务组织，包含 15 个独立技能。每个目录提供 SKILL.md、按需参考文档和界面元数据；可以单独复制使用，不要求其他技能目录同时存在。
 
 技能正文使用中文，自动匹配描述保留软件与方法的英文名称。内容采用通用化流程，不包含个人身份、组织、实际主机、项目路径、历史任务编号或私有数据。软件、算法和标准格式名称保留。
 
@@ -14,14 +14,15 @@
 | 4 | [VASP 计算准备](skills/vasp-calculations/SKILL.md) | vasp-calculations |
 | 5 | [CP2K 计算准备](skills/cp2k-calculations/SKILL.md) | cp2k-calculations |
 | 6 | [LAMMPS 模拟准备](skills/lammps-md/SKILL.md) | lammps-md |
-| 7 | [增强采样准备](skills/enhanced-sampling/SKILL.md) | enhanced-sampling |
-| 8 | [自由能分析](skills/free-energy-analysis/SKILL.md) | free-energy-analysis |
-| 9 | [MLP 数据集管线](skills/mlp-dataset-pipeline/SKILL.md) | mlp-dataset-pipeline |
-| 10 | [DFT 批量标注](skills/dft-labeling/SKILL.md) | dft-labeling |
-| 11 | [MLP 训练与验证](skills/mlp-training-validation/SKILL.md) | mlp-training-validation |
-| 12 | [轨迹统计分析](skills/trajectory-analysis/SKILL.md) | trajectory-analysis |
-| 13 | [溶剂化能分量分析](skills/solvation-energy/SKILL.md) | solvation-energy |
-| 14 | [电子结构与波函数分析](skills/electronic-properties/SKILL.md) | electronic-properties |
+| 7 | [恒电势计算](skills/constant-potential-calculations/SKILL.md) | constant-potential-calculations |
+| 8 | [增强采样与自由能分析](skills/enhanced-sampling/SKILL.md) | enhanced-sampling |
+| 9 | [计算氢电极计算](skills/che-calculation/SKILL.md) | che-calculation |
+| 10 | [MLP 数据集管线](skills/mlp-dataset-pipeline/SKILL.md) | mlp-dataset-pipeline |
+| 11 | [DFT 批量标注](skills/dft-labeling/SKILL.md) | dft-labeling |
+| 12 | [MLP 训练与验证](skills/mlp-training-validation/SKILL.md) | mlp-training-validation |
+| 13 | [轨迹统计分析](skills/trajectory-analysis/SKILL.md) | trajectory-analysis |
+| 14 | [溶剂化能分量分析](skills/solvation-energy/SKILL.md) | solvation-energy |
+| 15 | [电子结构与波函数分析](skills/electronic-properties/SKILL.md) | electronic-properties |
 
 ## 使用
 
@@ -52,9 +53,10 @@ environment.example.toml 仅展示环境配置的组织方式，不是 Codex 自
 
 ## 组合与边界
 
-- 原子模型构建 / 分子参数化 → 计算输入（VASP / CP2K / LAMMPS）→ 轨迹整理 → 统计分析 / 电子结构 / 溶剂化分析。
+- 原子模型构建 / 分子参数化 → 计算输入（VASP / CP2K / LAMMPS / `$constant-potential-calculations`）→ 轨迹整理 → 统计分析 / 电子结构 / 溶剂化分析。
 - 候选池筛选（`$mlp-dataset-pipeline`）→ DFT 批量标注 → 数据集清洗与划分（`$mlp-dataset-pipeline`）→ MLP 训练与验证。
-- 增强采样准备 → 自由能分析。
+- 增强采样（VASP / PLUMED / OPES 准备与动态 PMF 重建）→ `$enhanced-sampling`。
+- 静态 DFT / 恒电势单点与频率 → 计算氢电极计算（`$che-calculation`，静态台阶图）。
 
 各环节通过普通结构文件、CSV、JSON 和明确单位衔接，不要求安装额外工作流框架。相邻技能按请求组合，不能据此自动扩大计算或提交范围。
 

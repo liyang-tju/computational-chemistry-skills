@@ -1,4 +1,4 @@
 interface:
-  display_name: "增强采样准备"
-  short_description: "定义反应坐标、采样窗口和偏置输入，核对单位、周期边界与重启状态。"
-  default_prompt: "使用 $enhanced-sampling 完成当前任务，根据提供的输入和运行环境准备可复用结果。"
+  display_name: "增强采样与自由能分析"
+  short_description: "配置 VASP（Slow-growth/Blue Moon/Umbrella/MetaD）与 PLUMED（WT-MetaD/OPES/OPES Explore），并完成 PMF 重建与误差评估。"
+  default_prompt: "使用 $enhanced-sampling 完成当前任务，根据提供的反应机制、引擎和输出文件设计可复用增强采样输入或重建带误差分析的 PMF。"

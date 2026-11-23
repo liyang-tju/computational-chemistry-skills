@@ -1,0 +1,4 @@
+interface:
+  display_name: "恒电势计算"
+  short_description: "涵盖电荷扫描拟合、VASPsol++/TPOT、CP-VASP、i-PI、CPTI、LAMMPS electrode 与 CP-MACE 等恒电势方法。"
+  default_prompt: "使用 $constant-potential-calculations 完成当前任务，根据提供的体系、目标电势与计算引擎选择合适路线。"
