@@ -1,4 +1,0 @@
-interface:
-  display_name: "科研绘图与结构渲染"
-  short_description: "将已有数据与原子结构制作成科研图件，交付可编辑图片、数据和绘图脚本。"
-  default_prompt: "使用 $scientific-figures 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

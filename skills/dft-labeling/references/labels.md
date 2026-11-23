@@ -36,4 +36,4 @@ raw_forces = atoms.get_forces(apply_constraint=False)
 ## 4. 失败帧重试与去重
 
 - 对失败帧建立单独重试目录（如 `retry_01/`），记录 `retry_of_attempt` 和调整后的 SCF 参数（如 `ALGO = All`、`BMIX` 调小），切勿在同一汇总文件中把同一个 `sample_id` 收集两遍。
-- 跨集群传输回收结果后，验证每个输出文件行数完整、结构总数与 `sample_map.csv` 核对无误后再进入 `$mlp-dataset-curation`。
+- 跨集群传输回收结果后，验证每个输出文件行数完整、结构总数与 `sample_map.csv` 核对无误后再进入 `$mlp-dataset-pipeline`。

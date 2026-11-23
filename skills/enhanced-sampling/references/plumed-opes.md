@@ -29,7 +29,7 @@ PRINT ARG=d,coord,opes.bias,uwall.bias STRIDE=10 FILE=COLVAR
 - **`OPES_METAD` 常见语义陷阱**：
   - `BARRIER` 单位随 `UNITS ENERGY=...` 改变！若误把 kJ/mol 的数值 `50` 当成 eV 填入，会导致偏置强度荒谬放大近 100 倍。
   - `EXCLUDED_REGION` 只控制不往某个高能区沉积核，**不会把系统推回感兴趣区域**；需要防止构型飘远须使用 `UPPER_WALLS` / `LOWER_WALLS`。
-  - 续算时需加 `RESTART=YES` 及 `STATE_RFILE=STATE`（并确认 `STATE` 与 MD 重启文件处于同一时间步）；若重启后切换了 CV 定义或温度，应明确开始全新偏置或查阅当前 PLUMED 版本的重读限制。
+  - 续算时需加 `RESTART=YES` 及 `STATE_RFILE=STATE`，并核对 `COLVAR`、`KERNELS` 及 `STATE` 最后写入的 `time` 与 MD 检查点步号/时间严格一致；若重启后切换了 CV 定义或温度，应移除旧 `KERNELS`/`STATE` 并关闭 `RESTART`，或查阅当前 PLUMED 版本的重读限制。
 
 ## 2. ASE `Plumed` 与自定义 `LOAD` 接口注意
 

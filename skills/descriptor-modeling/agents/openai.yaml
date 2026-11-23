@@ -1,4 +1,0 @@
-interface:
-  display_name: "描述符与统计建模"
-  short_description: "定义结构性质描述符并建立统计模型，检查分组验证、单位和解释范围。"
-  default_prompt: "使用 $descriptor-modeling 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

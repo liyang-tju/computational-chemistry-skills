@@ -48,7 +48,7 @@ for idx, atoms in enumerate(it):
 ### 3. 抽帧、分段拼接与去重
 
 - **按步号/时间抽帧**：按明确的时间窗或间隔抽取（如每 `stride` ps），导出 `frame_index.csv` 记录每一帧的 `source_id`、`source_frame`、`simulation_step` 与 `time`。
-- **拼接续算段**：依据 `$simulation-audit-restart` 确定的检查点边界 `checkpoint_step` 截断父段尾部，再衔接子段 `step > checkpoint_step`；若需合并多条独立重复（replicas），必须保留 `replica_id` 列，不能拼成假连续时间轴。
+- **拼接续算段**：先对照日志/检查点核定健康断点 `checkpoint_step`（若崩溃前已发散或尾帧半残，须回退到最后一个完整健康检查点并丢弃残余半帧）；保留父段 `step <= checkpoint_step` 与子段 `step > checkpoint_step`（注意去重部分引擎续算首帧重复输出的 `checkpoint_step`），原父段文件保持不动。若需合并多条独立重复（replicas），必须保留 `replica_id` 列，不能拼成假连续时间轴。
 
 ### 4. 按目标用途处理标签与状态（仅在新副本操作）
 

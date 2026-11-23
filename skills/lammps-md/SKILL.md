@@ -46,11 +46,12 @@ lmp -h | grep -A 30 "Installed packages"
   2. **零总电荷导体（Q=0）**：电荷可极化分布，总电极净电荷约束为 0。
   3. **恒定外加电势 / 电势差**：使用 `ELECTRODE` 包（如 `fix electrode/conp`、`fix electrode/thermo`）固定电极电势或两极电势差，需确认当前二进制已启用 `ELECTRODE` 及对应 `kspace_style`（如 `pppm/electrode`）。
 
-### 5. 准备重启（Restart）与输出验证
+### 5. 准备重启（Restart）、完成验收与输出验证
 
-- 区分 `read_restart` 与 `read_data`：需要完整保留速度和部分 `fix` 内部状态时用二进制 `restart`；跨大版本或更换非兼容 `fix` 时改用 `write_data`/`read_data` 并明确标为重新初始化动力学状态。
-- `read_restart` 后须重新声明所有非持久化的 `fix`、`pair_style`（视风格而定）和 `dump`，并核对 `run <N> upto` 与 `reset_timestep` 语义。
-- 先执行 `0` 步试运行检查语法、初始力/能量是否有限以及 `kspace`/GPU 路径是否真正启用：
+- **科学完成与数值健康验收**：确认 `log.lammps` 末尾出现 `Total wall time`、最后输出 `Step` 达到目标步数且无 `ERROR` / `Lost atoms`；联合检查整段温度、势能/总能及关键键长，若崩溃前已出现原子飞散或数值畸变，须回退到崩溃前的健康二进制 `restart` 续算，不强行接续失真末帧。
+- **区分 `read_restart` 与 `read_data`**：需要完整保留速度和部分 `fix` 内部状态时用二进制 `restart`；跨大版本或更换非兼容 `fix` 时改用 `write_data`/`read_data` 并明确标为重新初始化动力学状态。
+- **`read_restart` 重声明与续算步数**：重读后须重新声明所有非持久化的 `fix`、`pair_style`（视风格而定）和 `dump`，在独立新目录续算并用 `run <S_target> upto` 避免手算剩余步数出错。
+- **0 步静态试跑**：先执行 `0` 步试运行检查语法、初始力/能量是否有限以及 `kspace`/GPU 路径是否真正启用：
 
 ```bash
 lmp -in input.lammps -log check.log   # 临时测试脚本中设 run 0

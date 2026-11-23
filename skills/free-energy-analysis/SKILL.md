@@ -45,7 +45,7 @@ description: "Reconstruct PMFs and free energy profiles from constrained MD (Blu
 
 ### 5. 构建热力学 / CHE 图与交付
 
-若涉及电化学反应自由能图或温度依赖焓熵分解，遵循 [参考态与比较](references/thermodynamics.md) 明确 $eU$ 符号、RHE/SHE 换算与标准态修正，然后输出数据表后再转入 `$scientific-figures` 绘图。
+若涉及电化学反应自由能图或温度依赖焓熵分解，遵循 [参考态与比较](references/thermodynamics.md) 明确 $eU$ 符号、RHE/SHE 换算与标准态修正，并输出完整数据表（含参考态与误差列）供后续可视化。
 
 ## 按需参考
 

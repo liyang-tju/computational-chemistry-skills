@@ -138,4 +138,5 @@ print("xyz frames:", len(steps_xyz), "first/last:", steps_xyz[0], steps_xyz[-1])
 
 - 比较浮点时间请用容差（如 `abs(t1 - t2) < 1e-4`），不要用精确字符串或 `==` 比较。
 - 仅对数值字段做 `D -> E` 替换，切勿对整行或含元素 `Dy` 的行做全局替换。
+- 异常中断后，若 `*-pos-1.xyz` 末尾存在半帧（行数不足 `natoms + 2`），合并或续算前须丢弃半帧；若能量/结构在崩溃前已发生畸变，应回退到崩溃前的健康备份 `*-1.restart.bak-*` 并核对 `STEP_START_VAL` 与 `*-1.ener` 一致。
 - 验收标准：检查输出末尾是否存在 `PROGRAM ENDED AT`、能量/温度无剧烈跳变、`MAX_SCF` 未持续饱和，且末尾 `.restart` 与最后一帧完整轨迹步号一致。

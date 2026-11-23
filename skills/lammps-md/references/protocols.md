@@ -70,6 +70,7 @@ write_restart   eq.restart
 ## 4. 平衡检验与体相密度统计
 
 - **NPT 平衡与真空界面的区分**：三维体相溶液可用 `fix npt` 调节密度；含真空层的二维 slab 不可直接开启 z 方向压控，应通过固定液膜厚度或先做三维 NPT 溶液盒预平衡再拼装表面，并在生产阶段统计**远离双电层界面的体相窗口**平均密度来核对水模型密度，切勿把界面吸附第一峰当成体相密度。
-- **Restart 续算检查**：
-  - `read_restart` 读入后重新定义 `fix shake`、`fix nvt`/`npt`、`fix setforce` 及 `dump`。
+- **Restart 续算与硬件确定性检查**：
+  - 正常完成以 `log.lammps` 出现 `Total wall time` 且达到目标 `Step`、无 `ERROR`/`Lost atoms` 为准；新目录续算使用 `read_restart` 配合 `run <S_target> upto` 并重新定义 `fix shake`、`fix nvt`/`npt`、`fix setforce`、`fix electrode/*` 及 `dump`。
   - 若使用 `write_restart` 续算，确认日志文件开头打印的 `Step` 延续前段末步；若使用 `write_data`，注意其不保存 `fix` 历史状态，但会保存速度和 `Image flags`（除非显式清空）。
+  - 仅改变 MPI ranks 或 GPU 数时，浮点求和顺序差异会导致单条 MD 轨迹在数十至数百步后分叉，属正常数值行为，但稳态热力学均值应一致。

@@ -1,4 +1,0 @@
-interface:
-  display_name: "代表性构型选择"
-  short_description: "汇总和筛选候选结构，按描述符覆盖选择代表构型并保留完整来源索引。"
-  default_prompt: "使用 $representative-selection 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

@@ -1,4 +1,0 @@
-interface:
-  display_name: "计算审计与续算"
-  short_description: "核对科学完成程度、有效检查点与续算边界，保留原始计算和来源记录。"
-  default_prompt: "使用 $simulation-audit-restart 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

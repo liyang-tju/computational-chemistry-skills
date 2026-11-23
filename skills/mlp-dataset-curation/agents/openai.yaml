@@ -1,4 +1,0 @@
-interface:
-  display_name: "MLP 数据集整理"
-  short_description: "检查标签与单位，合并和划分训练数据，保留旧划分并处理数据泄漏风险。"
-  default_prompt: "使用 $mlp-dataset-curation 完成当前任务，根据提供的输入和运行环境准备可复用结果。"
