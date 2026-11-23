@@ -1,4 +1,0 @@
-interface:
-  display_name: "MLP 训练与验证"
-  short_description: "准备单模型或委员会训练，验证导出模型、独立测试与动力学使用条件。"
-  default_prompt: "使用 $mlp-training-validation 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

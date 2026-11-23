@@ -92,5 +92,5 @@ HILLS_W       = 0.05     ! 高斯丘宽度 sigma (CV 单位)
 
 应优先按计算场景选择三条标准路径之一（细节见 [plumed-sampling.md](plumed-sampling.md)）：
 1. **ASE / i-PI 外挂驱动**：用 ASE `Plumed` 计算器或 [i-pi/i-pi](https://github.com/i-pi/i-pi) 作为引擎驱动力计算器，在每步注入 PLUMED 偏置力。
-2. **MLIP + LAMMPS / ASE + PLUMED**：先用 DFT 数据训练主动学习 MLIP（如 `$mlp-training-validation`），再以 LAMMPS/ASE + [plumed/plumed2](https://github.com/plumed/plumed2) 运行纳秒级 OPES / WT-Metadynamics。
+2. **MLIP + LAMMPS / ASE + PLUMED**：先用 DFT 数据训练主动学习 MLIP（如 `$mlp-workflow`），再以 LAMMPS/ASE + [plumed/plumed2](https://github.com/plumed/plumed2) 运行纳秒级 OPES / WT-Metadynamics。
 3. **切换到原生支持 PLUMED 的 DFT/MD 引擎**：如 CP2K（`&FREE_ENERGY&METADYN USE_PLUMED .TRUE.`）。

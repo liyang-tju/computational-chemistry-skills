@@ -47,7 +47,7 @@ mace_run_train \
   --forces_weight=100.0 \
   --potential_weight=10.0
 ```
-- 同样必须遵循 `$mlp-dataset-pipeline` 的按轨迹/条件 `group_id` 分组防泄漏切分，并在独立测试集上同时检验能量、力与 `potential` 预测误差。
+- 同样必须遵循 `$mlp-workflow` 的按轨迹/条件 `group_id` 分组防泄漏切分，并在独立测试集上同时检验能量、力与 `potential` 预测误差。
 
 ### ASE 恒电势动力学驱动
 使用 `ConstantPotentialNoseHoover` 驱动 `FermiMACE`（或单点 `Vasp` `solhybrid` 计算器）时：

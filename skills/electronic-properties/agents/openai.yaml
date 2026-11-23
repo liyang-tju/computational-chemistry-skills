@@ -1,4 +1,0 @@
-interface:
-  display_name: "电子结构与波函数分析"
-  short_description: "提取功函数、偶极、电荷与波函数性质，明确输入要求、符号和参考约定。"
-  default_prompt: "使用 $electronic-properties 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

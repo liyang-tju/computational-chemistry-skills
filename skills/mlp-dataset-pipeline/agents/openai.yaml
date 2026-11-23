@@ -1,4 +1,0 @@
-interface:
-  display_name: "MLP 数据集管线"
-  short_description: "执行代表性构型选择（QUESTS/MACE/FPS）、电子态区分去重与防泄漏训练/测试集划分。"
-  default_prompt: "使用 $mlp-dataset-pipeline 完成当前任务，根据提供的输入和运行环境准备可复用结果。"

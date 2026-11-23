@@ -1,4 +1,0 @@
-interface:
-  display_name: "DFT 批量标注"
-  short_description: "组织构型分批标注和结果收集，保留元数据、计算协议及逐帧失败记录。"
-  default_prompt: "使用 $dft-labeling 完成当前任务，根据提供的输入和运行环境准备可复用结果。"
