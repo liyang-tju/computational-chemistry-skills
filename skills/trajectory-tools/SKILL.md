@@ -2,81 +2,88 @@
 name: trajectory-tools
 description: "Convert, inspect, extract and join VASP, CP2K, LAMMPS, GROMACS and extxyz trajectories using ASE while preserving cell, PBC, step/time metadata and atom provenance. Use for trajectory I/O and preprocessing; statistical observables belong to trajectory-analysis."
 ---
-# 轨迹整理与转换
+# Trajectory Preparation and Conversion
 
-将来自 VASP、CP2K、LAMMPS、GROMACS 等引擎的结构与轨迹整理为标准化分析或标注输入（优先采用 ASE `extxyz`），完整保留晶胞、PBC、原子身份、步号/时间及来源索引。本技能负责格式转换、清洗、抽帧和分段拼接；统计观测量交由 `$trajectory-analysis`。
+Convert VASP, CP2K, LAMMPS, GROMACS, and other structures and trajectories to standardized inputs for analysis or labeling, preferably ASE `extxyz`. Preserve cells, PBC, atom identities, steps, times, and source indices. This skill covers conversion, cleaning, frame selection, and segment joins. Use `$trajectory-analysis` for statistical observables.
 
-## 开始前确认
+## Before Starting
 
-- **输入源与伴随文件**：轨迹文件及其必需的拓扑/晶胞/时间伴随文件（如 CP2K 的 `.cell` 与 `.ener`、LAMMPS 的 `data` 或 `type->element` 映射、GROMACS 的 `.gro`/`.tpr`、VASP 的 `POSCAR`/`INCAR` `POTIM`）。
-- **目标用途**：
-  1. **保留标签的数据集**（留存能量、力、应力）；
-  2. **待 DFT 标注结构**（剥离旧预测能量/力，保留电子态与约束）；
-  3. **MD 新初态**（明确是否清除速度，保留晶胞与约束）。
+- **Sources and companion files**. Identify topology, cell, and time metadata. Examples are CP2K `.cell` and `.ener`, LAMMPS `data` or `type->element` mapping, GROMACS `.gro` or `.tpr`, and VASP `POSCAR` and `INCAR` `POTIM`.
+- **Intended use**
+  1. **Labeled dataset** retaining energies, forces, and stresses.
+  2. **Structures for DFT labeling** with old predictions cleared and electronic-state metadata and constraints retained.
+  3. **New MD starting states** retaining cells and constraints, with explicit treatment of velocities.
 
-## 工作流程
+## Workflow
 
-### 1. 盘点格式与物理信息
+### 1. Identify Formats and Check Physical Metadata
 
-不能只看文件扩展名。先检查第一帧与配套日志，核对：
-- 原子总数与元素顺序（LAMMPS dump 若无 `element` 列，必须提供整数 `type -> element` 映射）；
-- 晶胞是否随时间变化（NPT/变胞轨迹绝对不能整条沿用首帧晶胞）；
-- 时间步长与输出间隔（计算 `time = simulation_step * dt`，区分 `frame_index` 与 `simulation_step`；缺少时间信息时保留 `None`/`NaN`，不凭帧数猜时长）。
+Inspect the first frame and associated logs to verify the following information.
+- Atom count and element order. Supply an integer `type -> element` map when a LAMMPS dump has no `element` column.
+- Cell changes. For NPT or other variable-cell runs, read the cell of every frame.
+- Integration time step and output stride. Distinguish `frame_index` and `simulation_step` when calculating `time = simulation_step * dt`. Use `None` or `NaN` when time information is missing.
 
-### 2. 流式读取与完整性检验
+### 2. Read Frame by Frame and Check Completeness
 
-对大轨迹使用 `ase.io.iread` 流式迭代，避免一次性爆内存，同时捕获异常截断尾帧并校验坐标有限性：
+Process and write large trajectories frame by frame. `ase.io.iread` memory use depends on the format reader, which may build an index or read a prefix. Exceptions can occur while advancing the iterator. This example checks extxyz coordinates and writes the parsed prefix to a new file. Inspect the source and logs after errors to determine whether truncation is at the tail or corruption occurs earlier.
 
 ```python
 import numpy as np
-from ase.io import iread
+from ase.io import iread, write
+from ase.io.extxyz import XYZError
 
-frames = []
-broken_tail = False
-it = iread("traj.xyz", index=":")
-for idx, atoms in enumerate(it):
+first_frame = last_frame = None
+written = 0
+with open("out.extxyz", "x") as output:
     try:
-        if not np.all(np.isfinite(atoms.positions)):
-            raise ValueError(f"Frame {idx} contains NaN/Inf positions")
-        frames.append(atoms)
-    except Exception as exc:
-        print(f"Stopped at frame {idx}: {exc}")
-        broken_tail = True
-        break
+        for atoms in iread("traj.extxyz", format="extxyz", index=":"):
+            if not np.all(np.isfinite(atoms.positions)):
+                raise ValueError(f"Frame {written} contains NaN/Inf positions")
+            write(output, atoms, format="extxyz")
+            if first_frame is None:
+                first_frame = atoms
+            last_frame = atoms
+            written += 1
+    except XYZError as exc:
+        raise ValueError(f"Input parse error after {written} written frames: {exc}") from exc
+if written == 0:
+    raise ValueError("No complete trajectory frames")
 ```
 
-### 3. 抽帧、分段拼接与去重
+### 3. Extract Frames, Join Segments, and Remove Duplicates
 
-- **按步号/时间抽帧**：按明确的时间窗或间隔抽取（如每 `stride` ps），导出 `frame_index.csv` 记录每一帧的 `source_id`、`source_frame`、`simulation_step` 与 `time`。
-- **拼接续算段**：先对照日志/检查点核定健康断点 `checkpoint_step`（若崩溃前已发散或尾帧半残，须回退到最后一个完整健康检查点并丢弃残余半帧）；保留父段 `step <= checkpoint_step` 与子段 `step > checkpoint_step`（注意去重部分引擎续算首帧重复输出的 `checkpoint_step`），原父段文件保持不动。若需合并多条独立重复（replicas），必须保留 `replica_id` 列，不能拼成假连续时间轴。
+- **Select by step or time**. Use explicit windows or strides, such as every `stride` ps. Record `source_id`, `source_frame`, `simulation_step`, and `time` in `frame_index.csv`.
+- **Join continuation segments**. Identify the last healthy `checkpoint_step` from logs and checkpoints. Fall back to an earlier complete checkpoint and exclude incomplete frames if the run diverged or the tail is truncated. Retain parent steps `step <= checkpoint_step` and child steps `step > checkpoint_step` so a repeated first checkpoint frame is included once. Preserve the parent. Keep `replica_id` when combining independent replicas and preserve independent timelines.
 
-### 4. 按目标用途处理标签与状态（仅在新副本操作）
+### 4. Manage Labels and State in New Copies
 
-写出前按需求决定保留或剥离哪些字段（详见 [数据表示与元数据](references/metadata.md)）：
-- 清理 ASE 旧计算器缓存务必使用 `atoms.calc = None`，并同步清理不再适用的 `atoms.info`（如 `energy`, `free_energy`, `stress`）与 `atoms.arrays`（如 `forces`, `momenta`）。
+Select fields according to the downstream use. [Data Representation and Metadata](references/metadata.md)
+- Clear stale calculators and remove actual stale keys from `atoms.info` and `atoms.arrays` as needed. `write_results=False` controls calculator-result output. Remove labels already stored in metadata or arrays separately.
 
-### 5. 写出并回读抽检
+### 5. Write Outputs and Read Back a Sample
 
-写出 `extxyz` 等目标格式后，必须重新读回代表帧（首帧、中帧、末帧）核对原子数、元素顺序、晶胞、PBC 与约束语义（如 `FixAtoms`）未损坏：
+Check the first, last, and representative middle frames against their sources for atom counts, element order, cells, PBC, and constraints. The example checks endpoints containing only `FixAtoms` or no constraints.
 
 ```python
-from ase.io import read, write
+from ase.io import read
 
-write("out.extxyz", frames, format="extxyz")
-check_first = read("out.extxyz", index=0)
-check_last = read("out.extxyz", index=-1)
-assert len(check_first) == len(frames[0])
-assert check_first.get_chemical_symbols() == frames[0].get_chemical_symbols()
-assert np.allclose(check_first.cell.array, frames[0].cell.array)
+for index, source in ((0, first_frame), (-1, last_frame)):
+    check = read("out.extxyz", format="extxyz", index=index)
+    assert check.get_chemical_symbols() == source.get_chemical_symbols()
+    assert np.allclose(check.cell.array, source.cell.array)
+    assert np.array_equal(check.pbc, source.pbc)
+    assert [item.todict() for item in check.constraints] == [
+        item.todict() for item in source.constraints
+    ]
 ```
 
-## 按需参考
+## References
 
-- VASP / CP2K / LAMMPS / GROMACS / `extxyz` 格式边界与解析技巧：阅读 [格式适配](references/formats.md)。
-- `frame_index.csv` 字段、标签清理代码与状态保留规则：阅读 [数据表示与元数据](references/metadata.md)。
+- Format details and parsing for VASP, CP2K, LAMMPS, GROMACS, and `extxyz`. [Format Handling](references/formats.md)
+- `frame_index.csv` fields, label cleanup, and state retention. [Data Representation and Metadata](references/metadata.md)
 
-## 交付产物与验收
+## Deliverables and Validation
 
-1. 转换后的结构/轨迹文件（如 `*.extxyz`）。
-2. **`frame_index.csv`**：每帧对应 `source_id, relative_path, source_frame, simulation_step, time, time_unit, segment_id, replica_id`。
-3. **`conversion.json`**：记录源文件列表、类型映射、截断/去重统计及回读校验结果。
+1. Converted structures or trajectories, such as `*.extxyz`.
+2. **`frame_index.csv`** with `source_id, relative_path, source_frame, simulation_step, time, time_unit, segment_id, replica_id` for every frame.
+3. **`conversion.json`** with sources, type mappings, truncation and deduplication counts, and read-back checks.

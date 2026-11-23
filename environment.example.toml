@@ -1,6 +1,6 @@
-# 可选的本地运行配置示例；此文件不会被 Codex 自动加载。
-# 空字符串表示尚未提供，不得自动猜测科学协议或提交资源。
-# 在任务副本中填值；可分发技能保持与具体主机无关。
+# Optional example of a local run configuration. Codex does not load this file automatically.
+# Empty strings denote unspecified values. Ask for missing scientific settings or job resources.
+# Fill in a copy for the current task. Keep distributed skills independent of any particular host.
 
 [runtime]
 python_command = "python"
@@ -27,6 +27,7 @@ walltime = ""
 vasp = ""
 cp2k = ""
 lammps = ""
+gromacs = ""
 plumed = ""
 orca = ""
 multiwfn = ""

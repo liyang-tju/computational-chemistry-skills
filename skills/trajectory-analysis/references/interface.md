@@ -1,37 +1,37 @@
-# 界面分布
+# Interfacial Distributions
 
-## 1. 相对表面坐标与参考面
+## 1. Surface-Relative Coordinates and Reference Plane
 
-不同条件下的晶胞原点或基底热运动高度可能发生微移，**不要直接沿用固定绝对 $z$ 窗**（例如硬编码 `z in [12, 15] Å`）：
-- 常用定义：每帧取表层金属原子（如顶层 `tag` 或 `role == "slab_top"`）的平均 $z_{\text{surf}}(t)$ 作为参考零点：
+Cell origins and thermally fluctuating slab heights can shift across conditions. Define windows relative to the surface instead of using an absolute cutoff such as `z in [12, 15] Å`.
+- A common reference is the mean height $z_{\text{surf}}(t)$ of top-layer metal atoms in each frame, identified by `tag` or `role == "slab_top"`.
   $$z_{\text{rel}, i}(t) = \text{wrap}_{z}\!\bigl(z_i(t) - z_{\text{surf}}(t)\bigr)$$
-- 明确法向正方向（指向液相侧为正），并将上下两个界面（若对称双界面）与真空区清晰分离，避免跨周期折叠混到一起。
+- Define the positive normal direction toward liquid. Track upper and lower interfaces and the vacuum separately so periodic folding does not mix them.
 
-## 2. 平面密度剖面与归一化
+## 2. Planar Density Profiles and Normalization
 
-对于法向分箱宽度 $\Delta z$、截面积 $A_{xy}(t) = |\mathbf{a}(t) \times \mathbf{b}(t)|_z$：
-- **数密度 / 质量密度**：
-  $$\rho(z_k) = \frac{\langle N_k(t) \rangle}{A_{xy} \Delta z} \quad \text{或质量密度}\;(\text{g/cm}^3) = \rho_{\text{num}}\,(\text{molecules/\AA}^3) \times \frac{M_{\text{mol}}}{N_A \cdot 10^{-24}}$$
-  （对于含 $N_{\text{frames}}$ 帧的变胞 NPT 轨迹，明确采用逐帧除以瞬时体积 $A_{xy}(t)\Delta z$ 再平均，还是总计数除以累计体积。）
-- **区分三种常用纵轴**：粒子绝对个数 $N(z_k)$、质量密度（$\text{g/cm}^3$）与归一化概率密度 $P(z_k)$（$\sum P(z_k)\Delta z = 1$）量纲完全不同；**必做自检**：将数密度沿区间积分，应精确等于该区间内的预期分子数。
-- **体相密度窗口**：应选取远离表面至少 10–15 Å 的平缓平台区间统计体相密度，不把第一/第二吸附水层密度峰当成体相密度。
+Use normal bin width $\Delta z$ and cross-sectional area $A_{xy}(t) = |\mathbf{a}(t) \times \mathbf{b}(t)|_z$.
+- **Number and mass density**
+  $$\rho(z_k) = \frac{\langle N_k(t) \rangle}{A_{xy} \Delta z} \quad \text{or mass density}\;(\text{g/cm}^3) = \rho_{\text{num}}\,(\text{molecules/\AA}^3) \times \frac{M_{\text{mol}}}{N_A \cdot 10^{-24}}$$
+  For an NPT trajectory with $N_{\text{frames}}$ frames, specify whether you divide by instantaneous $A_{xy}(t)\Delta z$ before averaging or divide the summed counts by cumulative bin volume.
+- **Axis definitions**. Distinguish particle counts $N(z_k)$, mass density ($\text{g/cm}^3$), and probability density $P(z_k)$ with $\sum P(z_k)\Delta z = 1$. Verify that the integrated number density reproduces the expected molecule count in the selected region.
+- **Bulk density**. Measure a flat bulk interval at least 10–15 Å from the surface. Report first- and second-layer adsorption peaks separately.
 
-## 3. 水分子取向统计
+## 3. Water Orientation
 
-- **偶极向量重建（防 PBC 撕裂）**：使用最小像距求出同一水分子中 $\mathbf{v}_1 = \text{MIC}(\mathbf{r}_{\text{H}_1} - \mathbf{r}_{\text{O}})$ 与 $\mathbf{v}_2 = \text{MIC}(\mathbf{r}_{\text{H}_2} - \mathbf{r}_{\text{O}})$，偶极方向为 $\hat{\mu} = (\mathbf{v}_1 + \mathbf{v}_2) / \|\mathbf{v}_1 + \mathbf{v}_2\|$（即 O 指向 H–H 中点，注意这是水分子偶极正方向；若论文定义负方向请显式注明）。
-- **测度陷阱**：
-  - $\langle \cos\theta \rangle$（带正负号：区分 H 朝向液相 vs H 朝向表面）与 $\langle |\cos\theta| \rangle$ 含义不同；
+- **Reconstruct dipole vectors with PBC**. Use $\mathbf{v}_1 = \text{MIC}(\mathbf{r}_{\text{H}_1} - \mathbf{r}_{\text{O}})$ and $\mathbf{v}_2 = \text{MIC}(\mathbf{r}_{\text{H}_2} - \mathbf{r}_{\text{O}})$ for the same water molecule. The direction is $\hat{\mu} = (\mathbf{v}_1 + \mathbf{v}_2) / \|\mathbf{v}_1 + \mathbf{v}_2\|$, from O to the H–H midpoint. State any opposite direction used in a comparison.
+- **Orientation measures**
+  - Signed $\langle \cos\theta \rangle$ distinguishes H pointing toward liquid or the surface. $\langle |\cos\theta| \rangle$ measures alignment regardless of sign.
   - $\arccos\langle \cos\theta \rangle \ne \langle \theta \rangle$；
-  - 在三维各向同性分布下，$P(\cos\theta)$ 是均匀分布（平直线），而 $P(\theta) \propto \sin\theta$（因球面面积元 $\mathrm{d}\Omega = 2\pi \sin\theta\,\mathrm{d}\theta$），因此**不能直接比较 $P(\theta)$ 与 $P(\cos\theta)$ 曲线形状**。
-- **取向加权密度**：$\rho(z)\langle \cos\theta(z) \rangle$ 表达的是极化取向净分布，若无电荷与偶极矩大小乘积因子，不要直接标注为“偶极密度”或“极化电荷密度”。
+  - Isotropy in 3D gives uniform $P(\cos\theta)$ and $P(\theta) \propto \sin\theta$ because $\mathrm{d}\Omega = 2\pi \sin\theta\,\mathrm{d}\theta$. Compare distributions under the same measure.
+- **Orientation-weighted density**. $\rho(z)\langle \cos\theta(z) \rangle$ gives the net directional distribution. Label it as orientation-weighted density when charge and dipole-magnitude factors are absent.
 
-## 4. RDF 与配位数（CN）
+## 4. RDFs and Coordination Numbers (CN)
 
 ```python
-# 示例：使用 ASE MIC 计算两组间距直方图及累计配位数
+# Use ASE MIC distances to histogram intergroup pairs and compute cumulative coordination.
 from ase.geometry import get_distances
 _, dists = get_distances(pos_ref, pos_target, cell=atoms.cell, pbc=atoms.pbc)
 ```
 
-- 同物种自身算 RDF（如 `O_w - O_w`）必须排除自身对（$i = j$）；计算溶质-水配位时写明是否排除同分子内部原子。
-- **受限界面注意**：传统三维均匀 RDF 归一化因子 $4\pi r^2 \rho_0 \Delta r$ 假设四周无限均匀分布；对于贴近固体金属表面的水层，半空间被金属占据，在较大 $r$ 处 $g(r)$ 不会自动收敛到 `1.0`（除非扣除不可及金属体积或按局部参照定义），报告时应予以注明或优先给出明确第一溶剂层截止半径 $r_{\text{cut}}$ 内的**积分平均配位数 CN**。
+- Exclude self-pairs ($i = j$) in same-species RDFs, such as `O_w - O_w`. For solute–water coordination, state whether intramolecular atoms are excluded.
+- **Confined interfaces**. The homogeneous 3D normalization $4\pi r^2 \rho_0 \Delta r$ assumes an isotropic bulk environment. Near a metal surface, excluded volume can prevent $g(r)$ from approaching `1.0`. State that limitation, correct for accessible volume or define a local reference, or report integrated mean CN within a specified first-shell cutoff $r_{\text{cut}}$.

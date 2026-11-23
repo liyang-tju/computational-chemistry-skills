@@ -1,4 +1,4 @@
 interface:
-  display_name: "分子参数化"
-  short_description: "组织分子量化计算、电荷拟合与力场拓扑，明确原子映射和参数兼容性。"
-  default_prompt: "使用 $molecular-parameterization 完成当前任务，根据提供的输入和运行环境准备可复用结果。"
+  display_name: "Molecular Parameterization"
+  short_description: "Fit molecular charges and build force-field topology"
+  default_prompt: "Use $molecular-parameterization to fit charges and assemble a compatible topology from the supplied molecular inputs."

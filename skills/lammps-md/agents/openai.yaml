@@ -1,4 +1,4 @@
 interface:
-  display_name: "LAMMPS 模拟准备"
-  short_description: "准备 LAMMPS 拓扑、平衡和生产模拟，支持独立重复与电极模型设置。"
-  default_prompt: "使用 $lammps-md 完成当前任务，根据提供的输入和运行环境准备可复用结果。"
+  display_name: "LAMMPS Simulations"
+  short_description: "Prepare LAMMPS replicas and electrode simulations"
+  default_prompt: "Use $lammps-md to prepare a reproducible simulation from the supplied inputs and runtime environment."

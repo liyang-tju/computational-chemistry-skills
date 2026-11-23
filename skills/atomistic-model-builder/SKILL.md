@@ -2,59 +2,59 @@
 name: atomistic-model-builder
 description: "Build molecules, crystals, slabs, adsorption structures, solvated cells and ion variants with ASE and Packmol. Use for geometry construction, PBC checks, FixAtoms constraints and atom mapping; force-field fitting and production MD belong to separate skills."
 ---
-# 原子模型构建
+# Atomistic Model Building
 
-使用 ASE（及可选 Packmol）构建分子、块体、表面 slab、吸附体系、溶剂盒与离子/质子缺陷变体，确保坐标、晶胞、周期性边界条件（PBC）、固定层约束及原子映射可追溯。本技能只负责几何构建与结构检查，不包含力场参数化或生产模拟。
+Use ASE and optionally Packmol to build molecules, bulk crystals, slabs, adsorption structures, solvent boxes, and structures with ions or proton defects. Record coordinates, cells, periodic boundary conditions (PBC), fixed layers, and atom mappings. This skill covers geometry construction and validation.
 
-## 开始前确认
+## Before You Start
 
-- **体系组成与边界**：化学式、总电荷、质子化状态、PBC（三维周期 `pbc=True` 或二维 slab `pbc=(True, True, True)` + 真空层）。
-- **表面参数**（若为界面）：参考体相来源、晶面 `(hkl)`、面内超胞、原子层数、终端面（termination）、固定层判据（按层/z 阈值）及真空厚度（常见 15–20 Å）。
-- **溶剂与离子**（若含液相）：目标区间（相对表面高度还是全盒）、目标密度或粒子数、最小安全间距（如 $d_{\min} \ge 1.5\text{–}2.0\,\text{\AA}$）及随机种子。
+- **Composition and boundaries.** Confirm the formula, total charge, protonation state, and PBC. Use `pbc=(True, True, True)` for a 3D-periodic slab with vacuum. For a model periodic only in `xy`, use `pbc=(True, True, False)` and verify that the simulation engine and electrostatics solver support those boundaries.
+- **Surface parameters.** For interfaces, record the source bulk structure, `(hkl)` plane, in-plane supercell, layer count, termination, fixed-layer criterion (layer or z threshold), and vacuum thickness (often 15–20 Å).
+- **Solvent and ions.** For systems with liquid, specify the target region (surface-relative or whole-box), density or particle count, minimum separation (for example, $d_{\min} \ge 1.5\text{–}2.0\,\text{\AA}$), and random seed.
 
-## 工作流程
+## Workflow
 
-### 1. 构建参考结构与基础几何
+### 1. Build the Reference Structure
 
-- **体相/表面**：优先从核实过的实验 CIF 或已优化体相晶胞出发，使用 `ase.build.surface` / `fcc111` / `make_supercell` 切割并加真空层（`slab.center(vacuum=15.0, axis=2)`）。
-- **吸附构型**：用 `add_adsorbate` 或旋转平移（`rotate`/`translate`）放置吸附质，保留位点名称（如 `top` / `bridge` / `fcc`）和取向标签。
-- **固定层约束**：按原子层 `tags` 或几何高度规则（如 `z < z_cutoff`）生成 `FixAtoms`，避免直接硬编码另一体系的原子索引。
+- **Bulk and surfaces.** Start from a verified experimental CIF or an optimized bulk cell. Use `ase.build.surface`, `fcc111`, or `make_supercell` to build the slab and add vacuum with `slab.center(vacuum=15.0, axis=2)`.
+- **Adsorption geometries.** Place adsorbates with `add_adsorbate` or `rotate` and `translate`. Keep site labels such as `top`, `bridge`, and `fcc`, along with orientation labels.
+- **Fixed layers.** Use layer `tags` or a geometry rule such as `z < z_cutoff` to construct `FixAtoms`. Derive indices from the current structure.
 
 ```python
 from ase.build import fcc111, add_adsorbate
 from ase.constraints import FixAtoms
 
 slab = fcc111("Pt", size=(4, 4, 4), vacuum=15.0)
-# 按底两层固定（依据 z 坐标聚类或 tag，而非猜测索引）
+# Identify the bottom two layers from z coordinates or layer tags.
 z_layers = sorted(set(round(z, 2) for z in slab.positions[:, 2]))
 z_fix_max = z_layers[1] + 0.2
 slab.set_constraint(FixAtoms(mask=slab.positions[:, 2] <= z_fix_max))
 ```
 
-### 2. 添加溶剂、离子或缺陷
+### 2. Add Solvent, Ions, or Defects
 
-- **估算溶剂分子数**：按**可及自由体积** $V_{\text{free}}$（扣除表面/溶质排除体积）估算初始分子数，不要直接用整个模拟盒体积估算：
+- **Solvent loading.** Estimate the initial molecule count from the accessible volume $V_{\text{free}}$ after subtracting the volume excluded by the surface and solutes.
   $$N_{\text{sol}} \approx \frac{\rho \cdot V_{\text{free}}\,(\text{\AA}^3) \cdot 10^{-24} \cdot N_A}{M\,(\text{g/mol})}$$
-  对常温纯水（$\rho \approx 1.0\,\text{g/cm}^3, M = 18.015\,\text{g/mol}$），约合 $0.0334\,\text{molecules/\AA}^3$。
-- **Packmol 填充**：将放置盒子向内缩进半个 `tolerance`（如 `z_min + 1.0` 到 `z_max - 1.0`），避免 Packmol 在非周期边界放入分子后跨周期边界发生原子重叠。
-- **质子/离子变体**：新增或删除原子（如 $\text{H}_2\text{O} \to \text{OH}^-$ 或 $\text{H}_3\text{O}^+$）时，同步记录化学计量变化、预期总电荷与电子数（供下游 DFT/MD 使用）。
+  For ambient pure water ($\rho \approx 1.0\,\text{g/cm}^3, M = 18.015\,\text{g/mol}$), this is about $0.0334\,\text{molecules/\AA}^3$.
+- **Packmol placement.** Inset the placement box by half the `tolerance`, for example from `z_min + 1.0` to `z_max - 1.0`, to avoid overlaps between periodic images when packing with nonperiodic boundaries.
+- **Proton and ion variants.** When adding or removing atoms, for example converting $\text{H}_2\text{O}$ to $\text{OH}^-$ or $\text{H}_3\text{O}^+$, record changes in stoichiometry, expected net charge, and electron count for downstream DFT or MD.
 
-### 3. 建立原子映射与逻辑分组
+### 3. Map and Group Atoms
 
-为所有原子记录稳定的分组标签（如 `slab`、`adsorbate`、`solvent`、`ion`），导出 `atom_mapping.csv`。对于发生重排、删减或拼接的结构，必须保留原始索引到新索引的映射：
+Assign stable role labels to all atoms, such as `slab`, `adsorbate`, `solvent`, or `ion`, and export `atom_mapping.csv`. When reordering, deleting, or joining atoms, retain the mapping from original to output indices.
 
-| 列名 | 含义 |
+| Column | Meaning |
 |---|---|
-| `new_index` | 输出结构中的 0-based 原子序号 |
-| `source_id` | 来源结构标识 |
-| `orig_index` | 原结构中的 0-based 序号（新建为 `-1`） |
-| `element` | 元素符号 |
-| `role` | 逻辑角色（`slab` / `adsorbate` / `solvent` / `ion`） |
-| `fixed` | 是否被约束固定（`True` / `False`） |
+| `new_index` | Zero-based atom index in the output |
+| `source_id` | Source structure identifier |
+| `orig_index` | Zero-based index in the source (`-1` for newly added atoms) |
+| `element` | Element symbol |
+| `role` | Atom role (`slab` / `adsorbate` / `solvent` / `ion`) |
+| `fixed` | Whether the atom is fixed (`True` / `False`) |
 
-### 4. 数值结构自检（必须执行）
+### 4. Validate the Written Structure
 
-写出结构后必须重新读回并用 **最小像距（MIC）** 检查跨周期边界接触、原子数和晶胞合法性：
+Read the output back. Verify atom counts and cell geometry, and use minimum-image convention (MIC) distances to detect contacts across periodic boundaries.
 
 ```python
 import numpy as np
@@ -66,20 +66,20 @@ np.fill_diagonal(dists, np.inf)
 min_d = dists.min()
 i, j = np.unravel_index(np.argmin(dists), dists.shape)
 print(f"natoms={len(atoms)}, min_mic_dist={min_d:.3f} A ({atoms[i].symbol}{i}-{atoms[j].symbol}{j})")
-assert np.all(np.isfinite(atoms.positions)), "存在 NaN/Inf 坐标"
-assert min_d > 0.85, f"发现严重重叠原子对: {i}-{j} ({min_d:.3f} A)"
+assert np.all(np.isfinite(atoms.positions)), "Coordinates contain NaN or Inf"
+assert min_d > 0.85, f"Severely overlapping atom pair: {i}-{j} ({min_d:.3f} A)"
 ```
 
-- 分子内部共价键（如 `O-H ~ 0.96–1.05 Å`）与非键最小距离（通常要求 `> 1.5 Å`）应分别检查。
-- 对仅完成几何构建或预松弛（未收敛）的结构，标记为 `candidate` / `unrelaxed`，不能标记为已优化。
+- Check intramolecular covalent bonds (for example, `O-H ~ 0.96–1.05 Å`) and nonbonded separations (commonly `> 1.5 Å`) separately.
+- Label built or partially relaxed structures as `candidate` or `unrelaxed` until optimization converges.
 
-## 按需参考
+## References
 
-- 表面切割、正交化陷阱、吸附位点去重及 Packmol 细节：阅读 [结构构建要点](references/geometry.md)。
+- See [Structure Building](references/geometry.md) for surface cuts, orthogonal supercells, adsorption-site deduplication, and Packmol.
 
-## 交付产物与验收
+## Deliverables and Validation
 
-1. **结构文件**：`*.extxyz` / `POSCAR` / `*.cif`（含完整 `cell`、`pbc`、`constraints` 及 `info` 元数据）。
-2. **`build.py`**：顶部集中配置输入、目标参数、随机种子与输出路径，可直接复现。
-3. **`atom_mapping.csv`**：完整原子索引与角色映射表。
-4. **`build_summary.json`**：记录参考来源、元素计数、总原子数、净电荷、约束数量、最小 MIC 间距及随机种子。
+1. **Structure files** (`*.extxyz`, `POSCAR`, or `*.cif`) with cell, PBC, constraint, and structure metadata preserved as supported by the output format.
+2. **`build.py`** with inputs, target parameters, random seeds, and output paths at the top.
+3. **`atom_mapping.csv`** with complete atom indices and role assignments.
+4. **`build_summary.json`** with the reference source, element counts, total atom count, net charge, constraint count, minimum MIC separation, and random seed.

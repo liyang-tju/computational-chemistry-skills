@@ -1,42 +1,53 @@
-# 输入与运行适配
+# Inputs and Runtime
 
-## 1. POTCAR 与元素映射检查
+## 1. POTCAR and Element Mapping
 
-- **一致性原则**：`POSCAR` 第 6 行的元素种类和出现顺序必须与 `POTCAR` 中 `TITEL` 的顺序严格一致。如果 `POSCAR` 包含重复元素段（如 `Pt O Pt`），尽量先合并排序再生成对应 `POTCAR`，或确保 `POTCAR` 完全按段拼接。
-- **赝势版本记录**：同一种元素常有标准版、`_pv`、`_sv`、`_h`、`_s` 或 GW 变体（例如 `O` vs `O_s` vs `O_h`，`Fe` vs `Fe_pv`）。同一对比系列计算必须采用完全一致的赝势组合，并在 `protocol_notes.md` 中记录 `TITEL` 列表。
-- **截断能基准**：常规 `ENCUT` 建议不低于所含所有 `POTCAR` 中最大 `ENMAX` 的 1.3 倍（或严格遵照项目统一协议，如 `400/450/520 eV`）。
+- **Species order**. Match the element groups on `POSCAR` line 6 to the `POTCAR` `TITEL` entries in order. For repeated groups such as `Pt O Pt`, preferably regroup the atoms before generating `POTCAR`, or concatenate pseudopotentials in the exact group order.
+- **Pseudopotential variants**. Elements can have standard, `_pv`, `_sv`, `_h`, `_s`, or GW variants (for example, `O`, `O_s`, and `O_h`, or `Fe` and `Fe_pv`). Use the same combination within a comparison series and record `TITEL` entries in `protocol_notes.md`.
+- **Plane-wave cutoff**. A common starting point is `ENCUT` of at least 1.3 times the largest `ENMAX` in `POTCAR`. Follow the project's agreed protocol when specified, such as `400/450/520 eV`.
 
-## 2. KPOINTS 与 k-spacing 约定
+## 2. Generate KPOINTS with VASPKIT
 
-使用自动生成网格或 `KSPACING` 时，必须注意不同工具对“倒空间间距”是否包含 $2\pi$ 的差异：
+Copy the target `POSCAR` into a separate preparation directory and run `vaspkit` there. Enter `102` to generate an SCF mesh. Select `2` for a Γ-centered mesh or `1` when the protocol calls for Monkhorst–Pack. Enter a reciprocal-space resolution such as `0.04`. The command below supplies the same menu inputs. [VASPKIT tutorial](https://vaspkit.com/tutorials.html#generate-kpoints)
 
-- **VASP 原生 `KSPACING`**（定义含 $2\pi$）：倒格矢长度 $|\mathbf{b}_i| = 2\pi |\mathbf{a}_j \times \mathbf{a}_k|/V$，网格数 $N_i = \max(1, \lceil |\mathbf{b}_i| / \text{KSPACING} \rceil)$。例如 `KSPACING = 0.20 Å⁻¹` 对应不含 $2\pi$ 记法中的 `0.032 × 2π Å⁻¹`。
-- **VASPKIT 等工具的 `2π` 记法**：常见如 `0.03` 或 `0.04`（单位 $2\pi\cdot\text{\AA}^{-1}$），实际分母是 $|\mathbf{b}_i| / (2\pi)$。
-
-若将两者数值直接混填，会导致 k 网格密度相差 $2\pi \approx 6.28$ 倍！生成后务必检查 `KPOINTS`（或 `IBZKPT`）的实际 $(N_1, N_2, N_3)$ 网格数是否符合预期，并确认 slab 真空方向固定为 `1`。
-
-## 3. 二进制变体与 GPU/MPI 并行布局
-
-- **变体选择**：
-  - `vasp_std`：通用复数版（支持任意 k 点）。
-  - `vasp_gam`：仅 Gamma 点实数波函数加速版（仅用于 `KPOINTS` 为 `1 1 1` Gamma-centered；切勿用于多 k 点）。
-  - `vasp_ncl`：非共线自旋 / SOC 版（`LNONCOLLINEAR = .TRUE.` 或 `LSORBIT = .TRUE.`）。
-- **并行参数（`KPAR` / `NCORE` / `NPAR`）**：
-  - 优先采用当前集群和当前 VASP 构建已验证的脚本配方，不要把“1 GPU 对应 1 MPI rank”或某台机器的 `NCORE` 值直接硬套到所有节点与 VASP 版本。
-  - GPU OpenACC 版本常见做法是使总 MPI rank 数等于可用 GPU 卡数（如单机 4 卡设 `ntasks=4`），`KPAR` 取 `1` 或整除 GPU 数且整除不可约 k 点数；部分 GPU 版本建议省略或固定 `NCORE = 1`。提交后务必查看 `OUTCAR` 开头几行确认实际运行的 `running on N total cores`、`distrk` 和 GPU 绑定信息。
-- **补丁与标签兼容性**：如使用 VTST（`IOPT`、`ICHAIN`）、VASPsol（`LSOL`、`EB_K`）、CP-VASP/Fermi-level 控制等补丁，须先核对当前二进制是否确实编入了对应模块（避免被未识别的 INCAR 参数静默忽略）。
-
-## 4. 重启、停止与常见错误排查
-
-- **兼容边界**：
-  - 修改 `ENCUT`、`ISPIN`、`LNONCOLLINEAR`、晶胞大小/形状或原子数后，**禁止**直接复用旧 `WAVECAR`；`CHGCAR` 在原子数和 FFT 网格（`NGXF/NGYF/NGZF`）不变时才兼容。
-  - 若结构在上一轮因 SCF 崩溃或原子飞散发生畸变，勿直接从末帧 `CONTCAR` 续算，应回退到崩溃前最后一个健康离子步或初始合理构型。
-- **正常中止（`STOPCAR`）**：
-  - 写入 `LSTOP = .TRUE.`：当前离子步完成后安全退出，写出完整 `CONTCAR` 与 `WAVECAR`（推荐）。
-  - 写入 `LABORT = .TRUE.`：当前电子步完成后立即退出，适合卡死急救，但末步力可能未收敛。
-- **结果自检命令**：
 ```bash
-# 检查离子收敛与电子步迭代是否触及 NELM 上限
+printf '%s\n' 102 2 0.04 | vaspkit
+sed -n '1,5p' KPOINTS
+```
+
+- The example `0.04` is in $2\pi\,\text{\AA}^{-1}$. Choose the resolution for the cell and observable, then inspect the actual mesh. For Γ-only, enter `2` followed by `0` and verify `1 1 1`.
+- Check mesh type, sampling in each direction, and shifts in `KPOINTS`. Use `1` along a slab's vacuum direction, for example `N_x N_y 1` for z vacuum. Preserve the scheme and shifts when reusing a verified mesh. Use the same verified `KPOINTS` within a comparison series or across NEB images.
+- Task `102` may also write `POTCAR` depending on version or configuration. Copy only the verified `KPOINTS` to the calculation directory and assemble pseudopotentials as described in section 1.
+- VASP samples the mesh from `KPOINTS` when the file exists. When generating a mesh from `INCAR` instead, `KSPACING` uses $\text{\AA}^{-1}$. VASPKIT `0.04` corresponds to a nominal `0.251 Å⁻¹`. Verify the actual mesh before use. [VASP KSPACING](https://vasp.at/wiki/KSPACING) · [VASP KGAMMA](https://vasp.at/wiki/KGAMMA)
+
+## 3. Executable Variants and GPU/MPI Layout
+
+- **Executable selection**
+  - `vasp_std` is the general complex-valued build for arbitrary k points.
+  - `vasp_gam` is the real-valued Γ-only build. Use a Γ-centered `1 1 1` mesh.
+  - `vasp_ncl` supports noncollinear spin and spin–orbit coupling (`LNONCOLLINEAR = .TRUE.` or `LSORBIT = .TRUE.`).
+- **Parallel settings (`KPAR`, `NCORE`, and `NPAR`)**
+  - Prefer a proven script for the available cluster and VASP build. Verify that settings such as one rank per GPU and the selected `NCORE` suit the actual node and executable.
+  - OpenACC GPU builds commonly use one MPI rank per GPU. Set `KPAR` to a divisor of the MPI ranks and distribute irreducible k points evenly. Follow the build's `NCORE` requirements, then check `OUTCAR` for MPI ranks, `distrk`, and GPU binding.
+- **Patches and keywords**. Verify that the executable includes any requested VTST (`IOPT`, `ICHAIN`), VASPsol (`LSOL`, `EB_K`), or CP-VASP Fermi-level control features. VASP can silently ignore unrecognized `INCAR` settings.
+
+## 4. Restarts, Stops, and Troubleshooting
+
+- **Restart compatibility**
+  - `ISTART = 1` reads a compatible `WAVECAR` and resets the basis if the cell or `ENCUT` changes. To continue the same variable-cell optimization with a constant basis, use `ISTART = 2` as documented by VASP. Verify compatible k points, bands, and spin representation and confirm the read in the log. To reuse `CHGCAR`, also check atom and pseudopotential mapping, cell, grid, and spin-density representation.
+  - If SCF failure or scattered atoms distorted the previous structure, recover the last healthy ionic step or a verified initial structure.
+- **Controlled stopping (`STOPCAR`)**
+  - Write `LSTOP = .TRUE.` for the preferred stop after the current ionic step, allowing complete `CONTCAR` and `WAVECAR` output.
+  - Write `LABORT = .TRUE.` for a stop after the current electronic step if a run is stuck. Final forces may be unconverged.
+- **Output checks**
+```bash
+# Check ionic convergence and whether the electronic iteration count reached NELM.
 grep "reached required accuracy" OUTCAR
-awk '/DAV:|RMM:|SDA:/ {step=$2} /free  energy   TOTEN/ {print "last_elec_iter=", step, $0}' OSZICAR | tail -n 10
+awk '
+    /^[[:space:]]*[[:alnum:]_-]+:[[:space:]]+[0-9]+/ {step=$2}
+    /^[[:space:]]*[0-9]+[[:space:]]+.*F=/ && step != "" {
+        print "last_elec_iter=", step, $0
+        step=""
+    }
+' OSZICAR | tail -n 10
 ```

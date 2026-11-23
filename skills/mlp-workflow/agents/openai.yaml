@@ -1,4 +1,4 @@
 interface:
-  display_name: "MLP 主动学习全流程"
-  short_description: "覆盖通用势预采样、分角色SOAP/QUESTS选帧、DFT试跑与批量标注、委员会MACE训练及不确定性主动学习回流。"
-  default_prompt: "使用 $mlp-workflow 完成当前任务，围绕通用势预采样、构型筛选、DFT标注、委员会训练或不确定性主动学习回流生成可复用流程与脚本。"
+  display_name: "Active Learning for Machine-Learning Potentials"
+  short_description: "Select structures, label DFT data, and train MACE committees"
+  default_prompt: "Use $mlp-workflow to prepare a reproducible workflow for presampling, structure selection, DFT labeling, committee training, or uncertainty-driven relabeling."

@@ -1,6 +1,6 @@
-# 动力学与重启
+# Dynamics and Restarts
 
-## 1. 常用输入骨架（NVT AIMD 示例）
+## 1. Example NVT AIMD Input
 
 ```text
 &GLOBAL
@@ -18,6 +18,10 @@
       CUTOFF 500
       REL_CUTOFF 60
     &END MGRID
+    &POISSON
+      PERIODIC XY
+      POISSON_SOLVER ANALYTIC
+    &END POISSON
     &QS
       EPS_DEFAULT 1.0E-12
       EXTRAPOLATION ASPC
@@ -103,28 +107,28 @@
 &END MOTION
 ```
 
-## 2. 系综、步长与约束要点
+## 2. Ensembles, Time Steps, and Constraints
 
-- **步长与氢质量**：常规全氢体系建议 `TIMESTEP 0.5` fs；若协议采用重氢质量（如在 `&KIND H` 下设 `MASS 2.014`）配合 `TIMESTEP 1.0` fs，必须在任务说明中显式记录并验证能量/温度稳定性。
-- **NPT 与表面体系**：`ENSEMBLE NPT_I` 或 `NPT_F` 适用于三维均匀块体或液体；含真空层的二维 slab 直接使用各向同性/全自由度 NPT 会导致真空层塌缩，除非有明确变胞协议并配合受限自由度。
-- **金属电极/导体体系**：需在 `&SCF` 中去掉 `&OT`，改用 `&DIAGONALIZATION` + `&SMEAR` + `&MIXING`（如 `ALPHA 0.2`）+ `ADDED_MOS`。注意金属体系若同时需要 `&OT` 无法进行部分占据。
+- **Time step and hydrogen mass**. Use `TIMESTEP 0.5` fs as a starting point for ordinary hydrogen. If using heavier hydrogen (for example, `MASS 2.014` in `&KIND H`) with `TIMESTEP 1.0` fs, record the mass choice and verify energy and temperature stability.
+- **NPT and surfaces**. `ENSEMBLE NPT_I` or `NPT_F` is suitable for homogeneous three-dimensional bulk systems and liquids. For slabs with vacuum, isotropic or fully flexible NPT can collapse the vacuum gap. Use a defined cell-relaxation protocol with constrained degrees of freedom if a variable cell is needed.
+- **Metal electrodes and conductors**. Remove `&OT` from `&SCF` and use `&DIAGONALIZATION`, `&SMEAR`, `&MIXING` (for example, `ALPHA 0.2`), and `ADDED_MOS`. Partial occupations require a solver other than OT.
 
-## 3. `&EXT_RESTART` 语义与状态切换
+## 3. `&EXT_RESTART` and Changes of State
 
-从前段 `*-1.restart` 续算时，CP2K 的 `STEPS` 在配合 `RESTART_COUNTERS .TRUE.` 时为**累计总步数上限**还是剩余步数需结合 `STEP_START_VAL` 确认（CP2K 中 `&EXT_RESTART` 读取 `STEP_START_VAL` 后，实际运行直到当前步号达到 `STEPS`，即若前段跑到第 2000 步、想再跑 3000 步，则 `STEPS` 应设为 `5000`）。
+When restarting from a previous `*-1.restart`, `STEPS` is the number of new MD steps, `STEP_START_VAL` is the initial step number, and `MAX_STEPS` is the cumulative step limit. To add 3000 steps from step 2000 with `RESTART_COUNTERS .TRUE.`, set `STEPS 3000` and ensure any configured `MAX_STEPS` is at least 5000.
 
-| 场景 | `RESTART_POS/VEL` | `RESTART_CELL` | `RESTART_THERMOSTAT` | `RESTART_COUNTERS` | `SCF_GUESS` |
+| Scenario | `RESTART_POS/VEL` | `RESTART_CELL` | `RESTART_THERMOSTAT` | `RESTART_COUNTERS` | `SCF_GUESS` |
 |---|---|---|---|---|---|
-| 同协议无缝续算 | `.TRUE.` | `.TRUE.`（NPT 时） | `.TRUE.` | `.TRUE.` | `RESTART`（配合 `.wfn`） |
-| 切换目标温度/热浴 | `.TRUE.` | 视系综定 | `.FALSE.` | 建议重记新段 | `RESTART`（体系未变时） |
-| 换用新初始结构重启 | `.FALSE.` | `.FALSE.` | `.FALSE.` | `.FALSE.` | `ATOMIC`（不可复用旧 `.wfn`） |
+| Continuous restart with the same protocol | `.TRUE.` | `.TRUE.` for NPT | `.TRUE.` | `.TRUE.` | `RESTART` with `.wfn` |
+| Change in target temperature or thermostat | `.TRUE.` | Depends on ensemble | `.FALSE.` | Prefer fresh counters for the new segment | `RESTART` if the system is unchanged |
+| Restart from a new initial structure | `.FALSE.` | `.FALSE.` | `.FALSE.` | `.FALSE.` | `ATOMIC` with a fresh wavefunction guess |
 
-## 4. 步号、时间与文件对齐检查
+## 4. Align Step Numbers, Times, and Files
 
-CP2K 的 `*-pos-1.xyz`、`*-1.cell` 和 `*-1.ener` 可能因各自 `&EACH` 频率不同或异常中断留下长度不一致的尾部，**禁止按行号对齐**：
+Different `&EACH` frequencies and interrupted writes can produce unequal tails in `*-pos-1.xyz`, `*-1.cell`, and `*-1.ener`. Align them by step and time.
 
 ```python
-# 核对 pos-1.xyz 与 1.ener / 1.cell 的 step 与 time 是否匹配
+# Check that step and time match across pos-1.xyz, 1.ener, and 1.cell
 import re
 steps_xyz = []
 with open("proj-pos-1.xyz") as f:
@@ -136,7 +140,7 @@ with open("proj-pos-1.xyz") as f:
 print("xyz frames:", len(steps_xyz), "first/last:", steps_xyz[0], steps_xyz[-1])
 ```
 
-- 比较浮点时间请用容差（如 `abs(t1 - t2) < 1e-4`），不要用精确字符串或 `==` 比较。
-- 仅对数值字段做 `D -> E` 替换，切勿对整行或含元素 `Dy` 的行做全局替换。
-- 异常中断后，若 `*-pos-1.xyz` 末尾存在半帧（行数不足 `natoms + 2`），合并或续算前须丢弃半帧；若能量/结构在崩溃前已发生畸变，应回退到崩溃前的健康备份 `*-1.restart.bak-*` 并核对 `STEP_START_VAL` 与 `*-1.ener` 一致。
-- 验收标准：检查输出末尾是否存在 `PROGRAM ENDED AT`、能量/温度无剧烈跳变、`MAX_SCF` 未持续饱和，且末尾 `.restart` 与最后一帧完整轨迹步号一致。
+- Compare floating-point times within a tolerance such as `abs(t1 - t2) < 1e-4`.
+- Replace `D -> E` only in numeric fields. Preserve text fields such as the element symbol `Dy`.
+- After an interruption, exclude a final incomplete `*-pos-1.xyz` frame with fewer than `natoms + 2` lines before merging or continuing. If energy or structure deteriorated before the crash, select a healthy earlier `*-1.restart.bak-*` and verify that `STEP_START_VAL` matches `*-1.ener`.
+- Verify `PROGRAM ENDED AT`, stable energy and temperature, absence of sustained `MAX_SCF` saturation, and agreement between the final `.restart` step and the last complete trajectory frame.

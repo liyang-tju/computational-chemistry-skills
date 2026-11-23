@@ -1,26 +1,26 @@
-# 氢键与配位
+# Hydrogen Bonds and Coordination
 
-## 1. 氢键几何判据的两种常见写法（必须标明）
+## 1. Hydrogen-Bond Geometry Conventions
 
-不同文献和软件对氢键角度的定义恰好**互补**（相差 $180^\circ$），写脚本前务必核实并写清：
+These angle definitions use different vertices and can select different hydrogen bonds even with the same distance cutoff. Use the convention in the target literature or software. The thresholds below are examples.
 
-| 判据要素 | 写法 A（常用，如 MDAnalysis / Luzar-Chandler） | 写法 B（常见于部分化学/VMD 定义） |
+| Criterion | A (vertex at donor D) | B (vertex at hydrogen H, as in MDAnalysis) |
 |---|---|---|
-| 供体–受体距离 | $d(\text{D}\cdots\text{A}) \le 3.5\,\text{\AA}$ | $d(\text{D}\cdots\text{A}) \le 3.5\,\text{\AA}$ |
-| H–受体距离（可选） | 有时附加 $d(\text{H}\cdots\text{A}) \le 2.5\,\text{\AA}$ | — |
-| **角度定义** | **$\angle(\text{H-D}\cdots\text{A}) \le 30^\circ$**（偏离共线小角） | **$\angle(\text{D-H}\cdots\text{A}) \ge 150^\circ$**（接近 $180^\circ$ 钝角） |
+| Donor–acceptor distance | $d(\text{D}\cdots\text{A}) \le 3.5\,\text{\AA}$ | $d(\text{D}\cdots\text{A}) \le 3.5\,\text{\AA}$ |
+| H–acceptor distance (optional) | Sometimes $d(\text{H}\cdots\text{A}) \le 2.5\,\text{\AA}$ | — |
+| **Angle** | **$\angle(\text{H-D}\cdots\text{A}) \le 30^\circ$** (small deviation from collinearity) | **$\angle(\text{D-H}\cdots\text{A}) \ge 150^\circ$** (near $180^\circ$) |
 
-- 切勿不说明角度顶点位置就只写“角度 cutoff = 30° 或 150°”；同时注意所有距离与向量必须在 PBC **最小像距（MIC）**下计算。
-- 对于含羟基的有机分子（如乙醇、羧酸）或表面羟基，明确哪些原子参与供体/受体候选集合（例如碳上 C-H 通常不算标准氢键供体）。
+- Report the vertex, atoms defining the two rays, and threshold. Use consistent periodic images for distances and angles in each triangle. The default angle in MDAnalysis `HydrogenBondAnalysis` is `D–H–A > 150°`.
+- For organic hydroxyl groups, such as in ethanol or carboxylic acids, and surface hydroxyls, define donor and acceptor candidates. Standard definitions generally exclude C–H donors.
 
-## 2. 反应性轨迹的动态原子归属
+## 2. Dynamic Atom Assignment in Reactive Trajectories
 
-在允许化学键断裂重组的 AIMD / MLP 轨迹中（如水合质子 $\text{H}_3\text{O}^+$ 迁移、$\text{H}_2\text{O}$ 解离）：
-- **不要沿用第 0 帧的静态分子拓扑表！**一旦发生质子转移，原先归属某氧原子的 H 已经变成另一个水分子的共价氢，维持旧拓扑会算出荒谬的氢键和分子内键长。
-- 必须逐帧按瞬时最近共价邻居（例如每个 H 归属距离最近的重原子 O/N，且 $d < r_{\text{cov,max}} \approx 1.25\text{–}1.35\,\text{\AA}$；若存在短暂双配位过渡状态如 Zundel $\text{H}_5\text{O}_2^+$，单独记录共享质子事件）重建分子身份，再统计氢键。
+In reactive AIMD or MLP trajectories, bonds can form or break, as in hydrated proton $\text{H}_3\text{O}^+$ migration or $\text{H}_2\text{O}$ dissociation.
+- Reassign molecular topology per frame. After proton transfer, a hydrogen can be covalently bound to another water, making the initial topology unsuitable for hydrogen-bond and intramolecular distance calculations.
+- Reconstruct identities from instantaneous covalent neighbors before counting hydrogen bonds. For example, assign each H to the nearest O or N within $d < r_{\text{cov,max}} \approx 1.25\text{–}1.35\,\text{\AA}$. Record brief shared-proton events, such as Zundel $\text{H}_5\text{O}_2^+$, separately.
 
-## 3. 分项统计与归一化分母
+## 3. Contributions and Normalization
 
-- 分别报告溶质作为**供体（HBD）**和作为**受体（HBA）**的氢键数、不同氧/氮原子位点的贡献以及不同水层内部的氢键数。
-- 明确写出归一化分母：**每条溶质分子**、**每个水分子**、**单位表面积（$\text{nm}^{-2}$）**还是**每帧总数**；同时说明同一个 H 产生分叉氢键（bifurcated）或同两个原子成多键时是否去重。
-- 记住：平均氢键数或氢键平均键长变化受局部密度、空间位阻和热涨落影响，**不能直接换算成单条氢键的结合能或反应能垒高低**。
+- Report solute **donor (HBD)** and **acceptor (HBA)** counts, contributions of individual O or N sites, and counts within each water layer.
+- State the normalization, such as per solute, per water, per surface area ($\text{nm}^{-2}$), or total per frame. Document deduplication of bifurcated bonds from one H and repeated atom-pair assignments.
+- Mean counts and lengths reflect local density, steric hindrance, and thermal fluctuations. Estimating individual bond energies or reaction barriers requires an energy analysis.

@@ -1,4 +1,4 @@
 interface:
-  display_name: "增强采样与自由能分析"
-  short_description: "配置 VASP（Slow-growth/Blue Moon/Umbrella/MetaD）与 PLUMED（WT-MetaD/OPES/OPES Explore），并完成 PMF 重建与误差评估。"
-  default_prompt: "使用 $enhanced-sampling 完成当前任务，根据提供的反应机制、引擎和输出文件设计可复用增强采样输入或重建带误差分析的 PMF。"
+  display_name: "Enhanced Sampling and Free-Energy Analysis"
+  short_description: "Set up enhanced sampling and reconstruct PMFs"
+  default_prompt: "Use $enhanced-sampling to prepare sampling inputs or reconstruct a PMF with uncertainty estimates for the supplied mechanism, engine, and outputs."

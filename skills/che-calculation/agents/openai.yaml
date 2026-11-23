@@ -1,4 +1,4 @@
 interface:
-  display_name: "计算氢电极计算（CHE）"
-  short_description: "计算静态吸附态 ZPE/TS 热校、配平 CHE 反应台阶图、RHE/SHE 换算与限制电位。"
-  default_prompt: "使用 $che-calculation 完成当前任务，根据提供的静态计算与热力学条件生成 CHE 自由能结果。"
+  display_name: "Computational Hydrogen Electrode (CHE)"
+  short_description: "Compute CHE free energies and limiting potentials"
+  default_prompt: "Use $che-calculation to build the CHE free-energy profile from the supplied static calculations and thermodynamic conditions."

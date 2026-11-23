@@ -1,24 +1,24 @@
-# 反应性与 Voronoi CV
+# Reactive and Voronoi CVs
 
-## 1. 质子转移体系的原子追踪问题
+## 1. Atom Tracking in Proton Transfer
 
-在水溶液或催化界面的质子交换反应（如 $\text{H}_3\text{O}^+$/$\text{OH}^-$ 迁移）中，特定 H 原子会从原来的氧跳到相邻水分子上。如果 CV 写死为某个氧原子和最初属于它的氢原子距离 $d(\text{O}_1\text{-H}_1)$：
-- 一旦其他水分子上的 $\text{H}_2$ 参与反应，原来的 $\text{O}_1\text{-H}_1$ 就不再代表目标反应坐标！
-- 此时应先明确追踪目标：是追踪**特定催化位点上的配位数/质子数**（如 `COORDINATION` 统计表面活性位点周围所有可转移 H 原子），还是追踪**随体系移动的过剩质子中心**（如基于连续 Voronoi/权重分配的质子中心或水合配位差）。
+In aqueous or catalytic interfacial reactions such as $\text{H}_3\text{O}^+$/$\text{OH}^-$ migration, a specific H atom can transfer from its original oxygen to a neighboring water. Consider a fixed atom-pair CV, $d(\text{O}_1\text{-H}_1)$.
+- When $\text{H}_2$ on another water participates, the original $\text{O}_1\text{-H}_1$ pair no longer tracks the process.
+- Decide whether to track coordination or proton count at a fixed site (for example, `COORDINATION` over all transferable H atoms around an active site), or a mobile excess-proton center using continuous Voronoi assignments, weighted centers, or differences in hydration coordination.
 
-## 2. Voronoi 与多原子配位 CV 构造原则
+## 2. Voronoi and Multi-Atom Coordination CVs
 
-设计 Voronoi 分配或平滑配位 CV 时：
-1. **明确分组**：区分“候选重原子组”（如金属活性位点 O/N 与所有溶剂水氧）和“可转移氢组”，确保列表顺序与真实元素对应。
-2. **平滑开关函数**：用于施加偏置力的 CV 必须处处连续且可微！禁止使用硬阶跃 `step()`、`if/else` 分段或带不连续跳变的 `sign()`；应采用平滑开关函数（如 PLUMED `RATIONAL`、`EXP` 或平滑 $\text{softmax}$ 权重 $\exp(-\lambda d_{ij}) / \sum_k \exp(-\lambda d_{ik})$）。
-3. **参考配位不能盲目照搬**：表面吸附氧、羧基氧、体相水氧的参考氢数（如 0、1、2）不同，不能把纯水氧的参考值复制到所有重原子。
+Apply the following checks when designing Voronoi assignments or smooth coordination CVs.
+1. **Atom groups**. Identify candidate heavy atoms, such as active-site O/N and all solvent oxygen atoms, and a separate transferable hydrogen group. Verify indices against element identities.
+2. **Smooth switches**. Biased CVs must be continuous and differentiable. Use PLUMED `RATIONAL`, `EXP`, or smooth $\text{softmax}$ weights $\exp(-\lambda d_{ij}) / \sum_k \exp(-\lambda d_{ik})$ in place of discontinuous `step()`, `if/else`, or `sign()` expressions.
+3. **Reference coordination**. Assign reference hydrogen counts such as 0, 1, or 2 according to the site. Surface oxygen, carboxyl oxygen, and bulk water oxygen can differ.
 
-## 3. 有限差分检查解析导数（核心验收）
+## 3. Finite-Difference Checks of Analytical Derivatives
 
-自定义 `CUSTOM`/`MATHEVAL` 或扩展 action 改写数学公式后，必须用小构型检验：
+After changing a `CUSTOM` or `MATHEVAL` expression or an extended action, test the formula on small configurations.
 
 $$F_k^{\text{num}} = -\frac{V_{\text{bias}}(x_k + \delta) - V_{\text{bias}}(x_k - \delta)}{2\delta} \quad (\delta \approx 10^{-5}\text{–}10^{-4}\,\text{\AA})$$
 
-对比 PLUMED 输出的偏置力与中心差分数值力（允许误差通常 $< 10^{-4}$），并检查：
-- 在不同离子对共存时，确认是目标反应位点主导了 CV 变化，而不是被体相中无关电解质离子对的涨落淹没；
-- 若依赖非标准源码编译的自定义 action，先用 `plumed info` / 源码检索确认当前环境支持该 action 名称与参数，缺失时立即报错说明所需扩展，绝不假定其为 PLUMED 内置能力。
+Compare PLUMED bias forces with central finite differences (typical tolerance $< 10^{-4}$). Check the following conditions as well.
+- When several ion pairs coexist, verify that changes in the target reaction site dominate the CV and that unrelated bulk ion-pair fluctuations are small.
+- For custom actions, confirm available names and parameters with `plumed info` or the source. Report missing extensions explicitly.

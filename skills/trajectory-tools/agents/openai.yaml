@@ -1,4 +1,4 @@
 interface:
-  display_name: "轨迹整理与转换"
-  short_description: "整理多种格式的轨迹、晶胞、时间与原子映射，输出可追溯的分析输入。"
-  default_prompt: "使用 $trajectory-tools 完成当前任务，根据提供的输入和运行环境准备可复用结果。"
+  display_name: "Trajectory Processing and Conversion"
+  short_description: "Convert, extract, and join trajectories with provenance"
+  default_prompt: "Use $trajectory-tools to prepare analysis inputs while preserving cells, time, atom mappings, and provenance."

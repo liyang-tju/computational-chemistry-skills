@@ -2,67 +2,67 @@
 name: lammps-md
 description: "Prepare LAMMPS classical MD and electrode simulations, including data/topology checks, unit conversions, equilibration/production stages, independent replicas and restart continuations."
 ---
-# LAMMPS 模拟准备
+# LAMMPS Simulation Setup
 
-准备拓扑、单位制、边界条件和阶段协议一致的 LAMMPS 经典分子动力学输入，支持多独立重复（replicas）、二进制重启以及恒电势/固定电荷电极模拟。
+Prepare classical MD inputs with consistent topology, units, boundary conditions, and stage protocols. Set up independent replicas, binary restarts, and fixed-charge or constant-potential electrode simulations.
 
-## 开始前确认
+## Before Starting
 
-- **单位与原子风格**：`units`（`real` / `metal` / `lj`）与 `atom_style`（`full` / `charge` / `atomic`）。
-- **拓扑与势函数**：`data` 或 `restart` 文件路径、元素到 `atom type` 的显式映射、所需 `pair_style` / `bond_style` / `angle_style` / `kspace_style` 与 `special_bonds`（如 AMBER / CHARMM / OPLS）。
-- **模拟阶段**：最小化（`minimize`）、升温/NPT 密度平衡、NVT 预平衡、生产采样与 `dump` 输出项。
-- **电极设置**（如适用）：固定电荷（fixed-charge）、固定总电荷还是恒电势（如 `ELECTRODE` 包的 `fix electrode/conp`），以及电压设定与参考方式。
-- **软件构建**：当前可用的 LAMMPS 可执行文件及其已编译的 package/style（CPU / GPU / Kokkos）。
+- **Units and atom style**. Specify `units` (`real`, `metal`, or `lj`) and `atom_style` (`full`, `charge`, or `atomic`).
+- **Topology and potentials**. Locate the `data` or `restart` file, map elements to `atom type` explicitly, and identify required `pair_style`, `bond_style`, `angle_style`, `kspace_style`, and `special_bonds` settings (such as AMBER, CHARMM, or OPLS).
+- **Stages**. Specify minimization (`minimize`), heating or NPT density equilibration, NVT pre-equilibration, production sampling, and `dump` fields.
+- **Electrodes where applicable**. Choose fixed atomic charges, fixed total charge, or constant potential such as `fix electrode/conp` from `ELECTRODE`. Record the voltage and reference convention.
+- **Build**. Verify the LAMMPS executable and compiled packages or styles for CPU, GPU, or Kokkos.
 
-## 工作流程
+## Workflow
 
-### 1. 检查 LAMMPS 编译能力与拓扑映射
+### 1. Verify Build Capabilities and Topology
 
-先只读核对二进制实际支持哪些包与加速后端，不要假设所有风格默认可用：
+Use read-only checks to identify the packages and acceleration backends supported by the actual executable.
 
 ```bash
 lmp -h | grep -A 30 "Installed packages"
 ```
 
-核对 `data` 文件头部与 `Masses` 段，建立 `type_id -> element -> role` 映射（例如 `type 1 = Pt`, `type 2 = Ow`, `type 3 = Hw`），确认 `data` 文件中实际含有的 `bonds`/`angles`/`dihedrals`/`impropers` 与输入脚本声明的势函数风格一致。
+Read the `data` header and `Masses` section to map `type_id -> element -> role` (for example `type 1 = Pt`, `type 2 = Ow`, and `type 3 = Hw`). Check that the `bonds`, `angles`, `dihedrals`, and `impropers` match the styles in the input.
 
-### 2. 核对单位制、力场组合与长程静电
+### 2. Verify Units, Force-Field Mixing, and Long-Range Electrostatics
 
-- **严防单位混用**：导入参数时按当前 `units` 转换时间步、能量、电荷和弹簧常数（详见 [MD 协议](references/protocols.md) 单位对照表）。例如 `1.0 fs` 在 `units real` 中写作 `timestep 1.0`，在 `units metal` 中必须写作 `timestep 0.001`。
-- **混合势与 1–4 规则**：使用 `pair_style hybrid` 或 `hybrid/overlay` 时，必须逐对检查交叉项 `pair_coeff i j` 是否全部显式给出或正确使用混合规则（`geometric` vs `arithmetic`）；按力场家族设置 `special_bonds`（如 `amber`、`charmm` 或 `lj/coul 0.0 0.0 0.5`）。
-- **二维界面静电**：含真空或双电层界面时，采用 `boundary p p f` 配合 `kspace_style pppm 1.0e-4` 与 `kspace_modify slab 3.0`（或与电极求解器兼容的 `pppm/electrode`），不要用三维周期长程静电直接算无保护间隔的非对称界面。
+- **Unit conversion**. Convert the time step, energy, charge, and spring constants to the selected `units`. For example, `1.0 fs` corresponds to `timestep 1.0` in `units real` and `timestep 0.001` in `units metal`. [MD Protocols](references/protocols.md)
+- **Hybrid potentials and 1–4 rules**. With `pair_style hybrid` or `hybrid/overlay`, check each cross term `pair_coeff i j` and whether it is supplied explicitly or by the correct `geometric` or `arithmetic` mixing rule. Use the force field's `special_bonds` convention, such as `amber`, `charmm`, or `lj/coul 0.0 0.0 0.5`.
+- **Slab electrostatics**. For vacuum or double-layer slabs, use `boundary p p f` with `kspace_style pppm 1.0e-4` and `kspace_modify slab 3.0`, or use `pppm/electrode` as appropriate. Check isolation when using long-range electrostatics on asymmetric interfaces.
 
-### 3. 设计最小化、平衡与生产阶段
+### 3. Set Up Minimization, Equilibration, and Production
 
-- **刚性水与约束**：刚性水模型（如 SPC/E、TIP3P）应使用 `fix shake`（仅用于支持 `rattle/shake` 的时间积分器，且需放在 `minimize` 之后、动力学之前；若必须最小化刚性水，先使用软弹簧或独立解除约束）。
-- **受控比较与独立重复**：
-  - 比较不同条件时保留相同的初始拓扑来源、势函数和截断参数，仅改变声明变量。
-  - 生成多条独立 `replica` 时，显式记录各自的 `velocity all create <T> <seed>` 随机种子或互不重叠的独立初态来源，不要将同一条轨迹相邻帧当成独立重复。
+- **Rigid water and constraints**. Use `fix shake` or `fix rattle` with a compatible integrator. Since LAMMPS 15Sep2022 these fixes can approximate constraints with stiff harmonic restraints during minimization. With older versions, minimize using a compatible flexible potential before enabling MD constraints.
+- **Controlled comparisons and independent replicas**
+  - Keep topology source, force field, and cutoffs consistent across conditions and vary only the declared variable.
+  - Record each `replica` seed used in `velocity all create <T> <seed>` or the source of each independent initial state. Adjacent frames from one trajectory share sampling history.
 
-### 4. 配置电极与恒电势协议（若适用）
+### 4. Configure the Electrode Model
 
-- 明确区分三类常见模型，不可混为一谈：
-  1. **固定原子电荷**：电极原子保持静态偏电荷（常为 0）。
-  2. **零总电荷导体（Q=0）**：电荷可极化分布，总电极净电荷约束为 0。
-  3. **恒定外加电势 / 电势差**：使用 `ELECTRODE` 包（如 `fix electrode/conp`、`fix electrode/thermo`）固定电极电势或两极电势差，需确认当前二进制已启用 `ELECTRODE` 及对应 `kspace_style`（如 `pppm/electrode`）。
+- Identify the intended model.
+  1. **Fixed atomic charges**. Electrode atoms carry fixed partial charges, often zero.
+  2. **Conductor with zero total charge (Q=0)**. Charges can redistribute while the total remains zero.
+  3. **Controlled potential or potential difference**. `fix electrode/conp` imposes the specified potentials. `fix electrode/thermo` uses a thermo-potentiostat to control the bias while allowing instantaneous potential fluctuations. Both require `ELECTRODE` and a compatible solver such as `pppm/electrode`.
 
-### 5. 准备重启（Restart）、完成验收与输出验证
+### 5. Prepare Restarts and Verify Outputs
 
-- **科学完成与数值健康验收**：确认 `log.lammps` 末尾出现 `Total wall time`、最后输出 `Step` 达到目标步数且无 `ERROR` / `Lost atoms`；联合检查整段温度、势能/总能及关键键长，若崩溃前已出现原子飞散或数值畸变，须回退到崩溃前的健康二进制 `restart` 续算，不强行接续失真末帧。
-- **区分 `read_restart` 与 `read_data`**：需要完整保留速度和部分 `fix` 内部状态时用二进制 `restart`；跨大版本或更换非兼容 `fix` 时改用 `write_data`/`read_data` 并明确标为重新初始化动力学状态。
-- **`read_restart` 重声明与续算步数**：重读后须重新声明所有非持久化的 `fix`、`pair_style`（视风格而定）和 `dump`，在独立新目录续算并用 `run <S_target> upto` 避免手算剩余步数出错。
-- **0 步静态试跑**：先执行 `0` 步试运行检查语法、初始力/能量是否有限以及 `kspace`/GPU 路径是否真正启用：
+- **Completion and numerical stability**. Check `Total wall time` in `log.lammps`, the target final `Step`, and the absence of `ERROR` or `Lost atoms`. Inspect temperature, potential and total energies, and key bond lengths across the segment. If atoms scattered or the system deteriorated before a crash, restart from a healthy earlier binary checkpoint.
+- **Restart method**. Use a binary `restart` to preserve velocities and supported internal `fix` state. For incompatible major versions or fixes, use `write_data` and `read_data` and record the resulting reinitialization of dynamics.
+- **`read_restart` and final steps**. Redeclare nonpersistent `fix`, `pair_style` where needed, and `dump` settings. Continue in a separate directory and use `run <S_target> upto` to specify the absolute target step.
+- **Zero-step test**. Check syntax, finite initial energies and forces, and activation of the intended `kspace` or GPU path.
 
 ```bash
-lmp -in input.lammps -log check.log   # 临时测试脚本中设 run 0
+lmp -in input.lammps -log check.log   # Set run 0 in the temporary test script.
 ```
 
-## 按需参考
+## Reference
 
-- `real`/`metal` 单位换算、标准输入骨架、电极求解器兼容表与恢复检查：阅读 [MD 协议](references/protocols.md)。
+- See [MD Protocols](references/protocols.md) for `real` and `metal` conversions, a template, electrode solver compatibility, and restart checks.
 
-## 交付产物与验收
+## Deliverables and Validation
 
-1. `input.lammps`（及分阶段脚本 `01_min.lmp` / `02_eq.lmp` / `03_prod.lmp`）、`data` 文件与类型映射 `type_map.json`。
-2. `replicas.csv`（记录每个重复的 `replica_id`、初态来源、随机种子与目标时长）。
-3. 验收标准：试跑无 `ERROR`/缺失系数，温度/总能/体相密度在平衡阶段稳定在目标窗口，且 `dump` 文件包含预期的 `id type x y z`（或未包裹坐标 `xu yu zu`）字段。
+1. `input.lammps`, any stage scripts (`01_min.lmp`, `02_eq.lmp`, `03_prod.lmp`), the `data` file, and `type_map.json`.
+2. `replicas.csv` with `replica_id`, initial state, seed, and target duration for each replica.
+3. Verify that the test reports no `ERROR` or missing coefficients, that equilibrated temperature, total energy, and bulk density stabilize in the intended ranges, and that `dump` includes `id type x y z` or unwrapped `xu yu zu` as requested.

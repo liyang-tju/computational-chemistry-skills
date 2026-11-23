@@ -1,43 +1,43 @@
-# 数据表示与元数据
+# Data Representation and Metadata
 
-## 1. `frame_index.csv` 推荐字段
+## 1. Recommended `frame_index.csv` Fields
 
-保留相对数据集根路径与逻辑标识，便于跨主机和跨目录复用（本机绝对路径只另存局部运行日志）：
+Use logical source identifiers and paths relative to the dataset root for portability. Keep host-specific absolute paths in local run logs.
 
-| 字段 | 说明 |
+| Field | Meaning |
 |---|---|
-| `sample_id` | 全局唯一帧标识（如 `sysA_rep1_s005000`） |
-| `source_id` | 原始计算段逻辑名 |
-| `relative_path` | 相对数据源根目录的路径 |
-| `source_frame` | 在源轨迹文件中的 0-based 帧索引 |
-| `simulation_step` | 引擎原始步号（未知留空） |
-| `time` | 物理时间（未知留空） |
-| `time_unit` | `fs` 或 `ps` |
-| `segment_id` | 续算分段号（如 `seg01`, `seg02`） |
-| `replica_id` | 独立重复编号（如 `rep01`） |
+| `sample_id` | Globally unique frame ID, such as `sysA_rep1_s005000` |
+| `source_id` | Logical name of the original run segment |
+| `relative_path` | Path relative to the data source root |
+| `source_frame` | Zero-based frame index in the source trajectory |
+| `simulation_step` | Original engine step, blank if unknown |
+| `time` | Physical time, blank if unknown |
+| `time_unit` | `fs` or `ps` |
+| `segment_id` | Continuation segment, such as `seg01` or `seg02` |
+| `replica_id` | Independent replica, such as `rep01` |
 
-## 2. 按下游任务清理与保留字段
+## 2. Retain or Clear Fields by Intended Use
 
-在**新副本**上按场景显式清理不需要的旧状态：
+Work on a new copy and remove stale state according to its intended use.
 
-| 目标用途 | 保留字段 | 必须清理/重置的字段 |
+| Intended use | Retain | Clear or reset |
 |---|---|---|
-| **带标签 MLP 数据** | 几何、晶胞、PBC、可靠参考 `energy`/`forces`/`stress`、协议版本 `protocol_id` | 无关中间缓存 |
-| **待 DFT 标注结构** | 几何、晶胞、PBC、`FixAtoms` 约束、预期 `charge`/`NELECT`/`spin`、`sample_id` | `atoms.calc = None`、旧预测 `energy`/`free_energy`/`forces`/`stress`、`momenta` |
-| **子体系抽取**（如裁剪溶剂/吸附质） | 裁剪后的几何、晶胞、新原子映射 | **必须删除**原完整体系的标量总能量与原子旧索引信息 |
-| **MD 初态** | 几何、晶胞、PBC、约束；仅连续重启时保留 `momenta`/速度 | 新初始化时清空 `momenta` 与旧 `energy`/`forces` |
+| **Labeled MLP data** | Geometry, cell, PBC, validated reference `energy`/`forces`/`stress`, and `protocol_id` | Unrelated intermediate caches |
+| **DFT labeling** | Geometry, cell, PBC, `FixAtoms`, target `charge`/`NELECT`/`spin`, and `sample_id` | Set `atoms.calc = None`. Remove stale `energy`/`free_energy`/`forces`/`stress` and `momenta`. |
+| **Subsystem extraction** (such as solvent or adsorbate) | Subset geometry, cell, and new atom mapping | Original full-system scalar energy and stale atom indices |
+| **MD starting state** | Geometry, cell, PBC, and constraints. Keep `momenta` or velocities for continuous restarts. | Clear `momenta` and old `energy`/`forces` for fresh initialization. |
 
 ```python
 def sanitize_for_dft_labeling(atoms):
-    """在副本上清除旧预测能量、力和动量，但保留几何、晶胞与 FixAtoms 约束。"""
+    """Clear old energy, force, and momentum data on a copy, retaining geometry, cell, and FixAtoms."""
     clean = atoms.copy()
     clean.calc = None
-    for key in ("energy", "free_energy", "stress", "virial"):
+    for key in ("energy", "free_energy", "stress", "virial", "REF_energy", "REF_stress", "REF_virials"):
         clean.info.pop(key, None)
-    for arr_key in ("forces", "force", "momenta"):
+    for arr_key in ("forces", "force", "momenta", "REF_forces"):
         clean.arrays.pop(arr_key, None)
     return clean
 ```
 
-- 清理前后务必检查 `len(clean) == len(atoms)`、`clean.get_chemical_symbols() == atoms.get_chemical_symbols()` 且约束数量一致。
-- 绝不能为了让解析器通过而凭空猜填缺失晶胞、`PBC` 或原子顺序。
+- Identify custom labels and whether they live in `info` or `arrays`. After cleanup verify atom and constraint mappings, electronic state, and provenance.
+- Record missing cell, `PBC`, or atom-order information explicitly and recover it from the source before using it.

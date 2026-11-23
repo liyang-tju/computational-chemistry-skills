@@ -1,26 +1,26 @@
-# 构象、事件与统计
+# Conformation, Events, and Statistics
 
-## 1. RMSD 计算与对齐方式
+## 1. RMSD and Alignment
 
-计算 RMSD 前必须先在周期性边界下重建完整分子或聚合物链（防止分子跨越边界一半在左一半在右导致 RMSD 暴增），再明确回答以下四问：
-1. **参考结构**：是初始优化构型、轨迹第 0 帧，还是平均结构？（比较不同条件时必须统一参照口径，用各自第 0 帧不能直接比较绝对结构稳定性排名）。
-2. **选中原子**：全部重原子、主链骨架，还是包含水/氢原子？是否按原子质量加权？
-3. **对齐方式（极其关键）**：
-   - **自身拟合对齐（Kabsch 平移+旋转去除）**：测量**分子内部构象柔性**；
-   - **以基底表面对齐（或不做整体旋转平移拟合）**：测量**分子相对表面的平动/翻滚与吸附几何变化**。两者回答的物理问题完全不同，不可混淆。
+Make molecules or polymer chains whole under PBC before computing RMSD. A chain split across the cell can produce a spurious increase. Specify the reference, atom selection, weighting, and alignment.
+1. **Reference structure**. Choose the optimized starting structure, frame 0, or the mean structure. Use a common reference convention across conditions. Each trajectory's own frame 0 measures displacement relative to that trajectory's start.
+2. **Atom selection**. Specify heavy atoms, backbone atoms, or additional water and hydrogen atoms, and whether the fit is mass-weighted.
+3. **Alignment**
+   - **Self-alignment**. Remove rigid translation and rotation with a Kabsch fit to measure internal conformational flexibility.
+   - **Alignment to the substrate or no rigid fit**. Measure adsorbate translation, rotation, and changes in adsorption geometry in the surface frame. Report the alignment used.
 
-## 2. 反应事件检测（防瞬时涨落误判）
+## 2. Reaction-Event Detection
 
-从轨迹中统计断键、成键、质子转移或分子解吸时：
-- **滞回双阈值 / 持续时间滤波**：单个步长的热涨落可能使键长瞬时越过单一阈值又立刻弹回。建议引入**滞回区间**（例如断键判据 $r > 1.35\,\text{\AA}$ 且恢复判据 $r < 1.15\,\text{\AA}$）或**最小持续驻留时间 $\tau_{\text{dwell}}$**（如持续 $\ge 50\,\text{fs}$ 才记为一次有效事件），并在脚本参数和结果中写明。
-- 输出每条事件表的详细字段：`replica_id, event_id, event_type, atoms_involved, start_time, end_time, duration, reversible`。区分可逆来回交换与永久性不可逆反应，**不要仅查看末帧构型就推断反应机制**。
+When detecting bond formation or breaking, proton transfer, or desorption, account for transient fluctuations.
+- **Hysteresis or minimum dwell time**. A bond can cross a single threshold for one step and immediately return. Use separate break and recovery thresholds, for example $r > 1.35\,\text{\AA}$ and $r < 1.15\,\text{\AA}$, or a minimum dwell time $\tau_{\text{dwell}}$ such as $\ge 50\,\text{fs}$. Record the criteria in the script and results.
+- Record `replica_id, event_id, event_type, atoms_involved, start_time, end_time, duration, reversible`. Distinguish reversible exchanges from persistent changes using the full event history.
 
-## 3. 时间相关统计与多重复聚合
+## 3. Correlated Statistics and Replica Aggregation
 
-- **有效样本数 $N_{\text{eff}}$**：利用自相关函数积分时间 $\tau_{\text{int}}$（`g = 1 + 2 * tau_int`）或分块平均（block averaging）评估单条轨迹内样本相关性。
-- **区分四种离散指标**：
-  - `SD`（帧间标准差）：刻画物理涨落幅度，**不随采样变长而缩小**；
-  - `SE_block`（单条轨迹分块标准误）：受相关时间限制，需确认块长远大于 $\tau_{\text{int}}$；
-  - `SE_replica`（多条独立重复轨迹均值间的标准误）：最可靠的可复现性误差来源；
-  - `95% CI`：置信区间，明确说明是按 $t$ 分布还是正态近似给出。
-- **多条轨迹汇总**：不要把 3 条各跑 100 ps 的独立轨迹拼在一起称为“300 ps 连续轨迹”。当各独立重复长度相同时，先求每条轨迹均值再计算跨重复均值与误差；长度不同时，明确选择等权平均还是按有效独立样本数加权。
+- **Effective sample size $N_{\text{eff}}$**. Estimate correlation from the integrated autocorrelation time $\tau_{\text{int}}$ (`g = 1 + 2 * tau_int`) or block averaging.
+- **Variability and uncertainty metrics**
+  - `SD` is the across-frame standard deviation. It measures physical fluctuations and does not shrink simply because sampling is longer.
+  - `SE_block` is the blocked standard error within a trajectory. Use blocks much longer than $\tau_{\text{int}}$.
+  - `SE_replica` is the standard error across independent replica means and measures reproducibility.
+  - `95% CI` is the confidence interval. State whether it uses a $t$ distribution or a normal approximation.
+- **Multiple trajectories**. Report three independent 100 ps runs as three replicates. With equal lengths, average per replica and then calculate the across-replica mean and error. With unequal lengths, state whether replicas are equally weighted or weighted by the effective sample count.

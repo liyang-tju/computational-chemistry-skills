@@ -1,0 +1,4 @@
+interface:
+  display_name: "GROMACS Molecular Dynamics"
+  short_description: "Prepare and validate staged GROMACS simulations"
+  default_prompt: "Use $gromacs-md to verify the structure and topology and prepare equilibration, production, and continuation inputs."

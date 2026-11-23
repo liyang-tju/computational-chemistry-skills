@@ -1,0 +1,4 @@
+interface:
+  display_name: "ORCA Molecular Calculations"
+  short_description: "Prepare and verify molecular ORCA Opt/Freq and SP jobs"
+  default_prompt: "Use $orca-calculations to prepare an ORCA optimization, verify frequencies, and obtain a single-point wavefunction on the same geometry."

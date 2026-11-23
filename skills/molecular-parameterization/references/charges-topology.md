@@ -1,35 +1,35 @@
-# 电荷与拓扑
+# Charges and Topologies
 
-## 1. 量化计算与波函数导出核查
+## 1. Verify Quantum Inputs and Wavefunction Exports
 
-- **阶段一致性**：确认用于 ESP/RESP 拟合的 `.fchk`/`.wfx`/`.molden` 确实对应同一优化收敛几何及用户指定的构象、电荷与自旋多重度。
-- **频率核对命令示例**：
-  - Gaussian：`grep "Frequencies --" job.log | head -n 5`（确认无负值虚频）。
-  - ORCA：`grep -A 15 "VIBRATIONAL FREQUENCIES" job.out`（前 6 个平动/转动模式接近 0，第 7 个及之后均为正数）。
+- **Consistency across stages.** Verify that the `.fchk`, `.wfx`, or `.molden` used for ESP/RESP fitting corresponds to the converged geometry and requested conformer, charge, and multiplicity.
+- Example commands for inspecting frequencies.
+  - Gaussian, `grep "Frequencies --" job.log | head -n 5`. Check the complete vibrational spectrum for imaginary modes.
+  - ORCA, `grep -A 15 "VIBRATIONAL FREQUENCIES" job.out`. For a nonlinear molecular minimum, check for six near-zero translational and rotational modes and positive frequencies starting with the seventh mode. Inspect the complete spectrum.
 
-## 2. 两阶段 RESP 与多构象拟合要点
+## 2. Two-Stage RESP and Multiconformer Fits
 
-仅仅写出“使用 RESP 电荷”不足以复现，必须明确记录：
-1. **静电势层级**：例如 HF/6-31G*（经典 AMBER/GAFF 历史标度）还是 B3LYP/def2-TZVP / PCM 隐式溶剂；不同层级与表面网格（MK vs CHELPG）得出的电荷不可混用。
-2. **两阶段约束流程**（以经典 RESP 为例）：
-   - Stage 1：弱双曲约束（如 `qwt = 0.0005` a.u.）自由拟合所有非等价原子，极性官能团电荷确定；
-   - Stage 2：固定极性重原子电荷，仅对非极性甲基/亚甲基（`CH3`/`CH2`）施加较强约束（如 `qwt = 0.001` a.u.）并强制对称等价氢电荷相同。
-3. **多构象联合拟合**：对柔性分子或带侧链聚合物，同时使用多个低能代表构象进行多构象联合 RESP 拟合（并记录各构象权重），与单构象独立拟合再求平均是两种不同流程。
-4. **工具使用**：使用 Multiwfn 做 RESP 拟合时，先单样本核实当前版本菜单选项，再固定 `answers.txt`；使用 AmberTools 时通过 `respgen` / `resp` 检查等价组文件 `.qin` 与输出 `.chg` 的总电荷误差。
+Record the details required to reproduce the RESP charges.
+1. **ESP level.** For example, HF/6-31G* follows the historical AMBER/GAFF convention, while another protocol might specify B3LYP/def2-TZVP with PCM. Keep the quantum level and surface grid (MK or CHELPG) consistent across comparable fits.
+2. **Restraints for classical two-stage RESP.**
+   - Stage 1 uses a weak hyperbolic restraint (for example, `qwt = 0.0005` a.u.) and fits all nonequivalent atoms to determine polar-group charges.
+   - Stage 2 fixes polar heavy-atom charges, applies a stronger restraint (for example, `qwt = 0.001` a.u.) to nonpolar methyl or methylene groups (`CH3`/`CH2`), and equates symmetry-equivalent hydrogen charges.
+3. **Joint multiconformer fitting.** Fit several representative low-energy structures together for flexible molecules or polymers with side chains, and record conformer weights. Averaging independent fits defines a different protocol.
+4. **Tools.** For Multiwfn, verify the current menu on one sample before recording `answers.txt`. For AmberTools, use `respgen` and `resp` to check equivalence definitions in `.qin` and the total charge in `.chg`.
 
-## 3. 聚合物模板（Head / Monomer / Tail）提取
+## 3. Extract Head, Internal, and Tail Polymer Templates
 
-构建含 $N$ 个重复单元的长链聚合物时，通常基于寡聚体（如三聚体 `Cap-Head-Monomer-Tail-Cap`）拟合电荷后再切分模板：
-- **端帽电荷归零/微调约束**：在 RESP 拟合阶段对两端端帽基团（cap atoms）施加总电荷约束（如设为 `0` 或已知标准端基电荷），或者在切除端帽后把残余小数电荷按规则分配至连接点原子，确保中间重复单元净电荷精确等于整数（中性链为 `0.0000`）。
-- **验证拼接**：用 2 个或 3 个单元实际拼接后，检查总原子数、总电荷、连接键参数及跨越连接键的二面角参数是否全部存在且无重复编号。
+For a polymer with $N$ repeat units, a common approach is to fit charges on an oligomer such as the capped trimer `Cap-Head-Monomer-Tail-Cap`, then split it into templates.
+- **Cap charges and residual adjustments.** Constrain the cap-group total charge during RESP to `0` or a known end-group charge, or distribute residual charge to junction atoms by a documented rule after cap removal. Make the internal unit sum exactly to its intended integer charge (`0.0000` for a neutral chain).
+- **Check assembly.** Assemble two or three units and check atom count, total charge, junction bond parameters, torsions crossing the junction, and unique atom numbering.
 
-## 4. 主流力场家族规则对照（切勿混搭）
+## 4. Force-Field Conventions
 
-| 力场家族 | 1–4 LJ 缩放 (`fudgeLJ`) | 1–4 静电缩放 (`fudgeQQ`) | 非键混合规则 | 典型势函数单位/形式注意 |
+| Force-field family | 1–4 LJ scaling (`fudgeLJ`) | 1–4 electrostatic scaling (`fudgeQQ`) | Nonbonded mixing | Potential forms and units |
 |---|---|---|---|---|
-| **AMBER / GAFF / GAFF2** | `0.5` | `1/1.2 ≈ 0.8333` | Lorentz-Berthelot（`arithmetic` $\sigma$, `geometric` $\epsilon$） | $r_{\min}/2$ vs $\sigma$（转换因子 $2^{1/6}$） |
-| **OPLS-AA** | `0.5` | `0.5` | Geometric（`geometric` $\sigma$ & $\epsilon$） | 二面角多用 Ryckaert-Bellemans / Fourier |
-| **CHARMM** | `1.0`（或特定 1–4 LJ 表） | `1.0` | Lorentz-Berthelot（`arithmetic`） | 含 Urey-Bradley 1–3 项及 CMAP |
+| **AMBER / GAFF / GAFF2** | `0.5` | `1/1.2 ≈ 0.8333` | Lorentz–Berthelot (arithmetic $\sigma$, geometric $\epsilon$) | Check the $r_{\min}/2$ and $\sigma$ conventions ($r_{\min}=2^{1/6}\sigma$) |
+| **OPLS-AA** | `0.5` | `0.5` | Geometric for $\sigma$ and $\epsilon$ | Torsions commonly use Ryckaert–Bellemans or Fourier forms |
+| **CHARMM** | `1.0` (or specific 1–4 LJ parameters) | `1.0` | Lorentz–Berthelot (`arithmetic`) | Includes Urey–Bradley 1–3 terms and CMAP |
 
-- **受控敏感性对照**：仅在探索“静电电荷分布对吸附的影响”时才可固定力场其他参数并对比不同电荷方案，同时明确声明其为受控灵敏度分析，而非标准可迁移力场。
-- **界面相互作用评估**：比较不同分子/基团与表面相互作用时，除了单对原子 LJ 势，还需结合构象变化、溶剂水合竞争及整分子吸附几何共同解释，不把单原子参数大小直接等同于宏观亲和力顺序。
+- **Controlled sensitivity comparisons.** To study the effect of charge distribution on adsorption, hold other parameters fixed and compare charge models. Label the result as a sensitivity study with a specific protocol.
+- **Interface interactions.** Interpret atom-pair LJ interactions alongside conformational changes, competition with solvent hydration, and whole-molecule adsorption geometry.

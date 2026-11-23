@@ -1,29 +1,29 @@
-# 能量组合与参考
+# Energy Decomposition and References
 
-## 1. 常用冻结能量分解公式辨析
+## 1. Frozen Energy Decompositions
 
-令 $S$ 为基底表面、$A$ 为吸附质、$W$ 为显式溶剂与离子层、$AWS$ 为完整界面体系：
+Let $S$ be the surface, $A$ the adsorbate, $W$ the explicit solvent and ions, and $AWS$ the complete interface.
 
-1. **溶剂对吸附能的冻结交互修正（四分量）**：
+1. **Frozen solvent effect on adsorption energy (four components)**
    $$\Delta \Delta E_{\text{solv}}^{\text{ads}} = \bigl[E(AWS) - E(WS)\bigr] - \bigl[E(AS) - E(S)\bigr] = E(AWS) - E(WS) - E(AS) + E(S)$$
-   - **物理含义**：在当前冻结几何下，显式溶剂层 $W$ 的存在对 $A$–$S$ 吸附结合能带来的直接静电/氢键/泡利排斥调制量。
-   - **限制**：因为 $W$ 和 $S$ 在取走 $A$ 后未重新弛豫（未计入空腔形成自由能和溶剂重组熵），所以它**不是**热力学平衡态溶剂化自由能 $\Delta G_{\text{solv}}$。
-2. **引入孤立吸附物 $A$（五分量）**：
-   - 当同时计算气相或溶剂化对照 $E(A)$ 时，可拆分为真空冻结吸附能 $\Delta E_{\text{ads}}^{\text{vac}} = E(AS) - E(S) - E(A)$ 与溶剂调制项 $\Delta \Delta E_{\text{solv}}^{\text{ads}}$；也可记录吸附质与溶剂的冻结相互作用 $E_{\text{int}}(A\text{-}W)$。
-   - **几何统一检查**：若 $E(A)$ 来自气相独立优化几何，而 $E(AS)$ 来自液相轨迹冻结变形几何，则两者之差同时包含了吸附质内部几何形变能（strain energy），需在命名中标明。
+   - This is the net effect of $W$ on adsorption at the frozen geometry, including $A$–$W$ interactions and nonadditive response involving $S$.
+   - With $W$ and $S$ frozen after removal of $A$, the result excludes cavity formation free energy and solvent reorganization entropy, both relevant to equilibrium solvation free energy $\Delta G_{\text{solv}}$.
+2. **Include the isolated adsorbate $A$ (five components)**
+   - With isolated $E(A)$ at the same frozen geometry, report the frozen vacuum adsorption energy $\Delta E_{\text{ads}}^{\text{vac}} = E(AS) - E(S) - E(A)$ and the solvent modulation $\Delta \Delta E_{\text{solv}}^{\text{ads}}$. For the frozen $A$–$W$ interaction without the substrate, use consistently defined $E(AW)-E(A)-E(W)$.
+   - If $E(A)$ uses an independently optimized gas-phase geometry and $E(AS)$ a deformed frozen solution geometry, label the resulting difference as including adsorbate strain energy.
 
-## 2. 电子数、带电片段与恒电势对照
+## 2. Electron Counts, Charged Fragments, and Constant Potential
 
-- **带电片段周期单点**：当 $A$ 或 $W$ 含有净离子电荷（如 $\text{H}_3\text{O}^+$、$\text{K}^+$、$\text{OH}^-$），将其从完整中性界面拆分后，子体系将带有净电荷（需调整 VASP `NELECT` 或 CP2K `CHARGE`）。带净电荷的三维周期盒能量包含均匀背景中和电荷带来的有限尺寸静电伪影；不同体系或盒长间直接比较时须注明或加入修正。
-- **恒电势 vs 恒电荷**：比较恒电势条件时，各片段在不同电势或不同表面电子数下的能量应通过电子化学势转换至同一电子参考标尺（如巨正则势 $\Omega = E - \mu_e \Delta N_e$），切勿把不同电子数的原始 DFT 总能直接相减。
+- **Charged periodic fragments**. When $A$ or $W$ contains a net ionic charge, such as $\text{H}_3\text{O}^+$, $\text{K}^+$, or $\text{OH}^-$, the fragment can be charged even when the full interface is neutral. Adjust VASP `NELECT` or CP2K `CHARGE`. A uniform neutralizing background introduces finite-size electrostatic artifacts in 3D periodic cells. Document or correct them when comparing systems or cell lengths.
+- **Constant-potential energies**. Align fragment energies with the same electron reference using the electron chemical potential, for example the grand potential $\Omega = E - \mu_e \Delta N_e$. Use this convention consistently when subtracting states with different electron counts.
 
-## 3. 统计汇总与结果核查
+## 3. Statistics and Result Checks
 
-- **剔除假收敛**：合并前用与 `$mlp-workflow` 相同的逐帧 SCF 验收规则核对每个片段子任务均电子收敛，并验证：
+- Verify SCF convergence of every fragment before merging with the per-frame checks in `$mlp-workflow`. Check complete and finite fragment sets.
   ```python
-  # 示例：检查四分量每帧完整且数值有限
+  # Check that each frame has four finite fragment energies.
   req = ["AWS", "WS", "AS", "S"]
   valid = df.pivot(index="sample_id", columns="fragment", values="energy").dropna(subset=req)
   valid["delta_E_solv_ads"] = valid["AWS"] - valid["WS"] - valid["AS"] + valid["S"]
   ```
-- **区分轨迹平均与单帧采样**：同一条件下多条独立重复先求各轨迹均值再求总体均值与重复间误差；累计平均曲线仅作辅助判断平衡段，不替代分块或重复误差。
+- Average each independent trajectory first, then estimate the condition mean and between-replica error. Cumulative means can help identify equilibration. Use block or replica analysis for uncertainty.

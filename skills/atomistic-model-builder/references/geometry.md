@@ -1,23 +1,23 @@
-# 结构构建要点
+# Structure Building
 
-## 1. 晶体与表面构建
+## 1. Crystals and Surfaces
 
-### 超胞与正交化
-- `ase.build.surface(bulk, indices, layers, vacuum)` 得到的晶格默认保留原始斜交基矢；部分晶面（如 fcc `(111)`、hcp `(0001)`）可构造正交超胞，但并不是所有 `(hkl)` 面都存在小体积正交胞。
-- 需要正交化时（如使用 `fcc111(..., orthogonal=True)` 或 `ase.build.make_supercell` 矩阵变换），变换后必须检查：
-  1. 新超胞面积与层间原子数是否为原胞的整数倍；
-  2. 晶格矢量手性为右手系（$\det(\mathbf{A}) > 0$），避免部分程序报错；
-  3. 周期边界上未出现断裂的多原子分子或表面重构缺失。
+### Supercells and Orthogonal Cells
+- `ase.build.surface(bulk, indices, layers, vacuum)` can produce oblique slab vectors. Some facets, such as fcc `(111)` and hcp `(0001)`, admit orthogonal supercells. A compact orthogonal cell may be unavailable for a general `(hkl)` facet.
+- When constructing an orthogonal cell with `fcc111(..., orthogonal=True)` or a matrix passed to `ase.build.make_supercell`, check the following.
+  1. The supercell area and number of atoms per layer are integer multiples of the corresponding primitive-cell quantities.
+  2. The lattice vectors form a right-handed basis ($\det(\mathbf{A}) > 0$).
+  3. Molecular connectivity and the intended surface reconstruction are preserved across periodic boundaries.
 
-### 固定层选择
-不要把旧文件的 `FixAtoms(indices=[...])` 直接复制到新体系。统一采用几何或标签规则：
+### Fixed-Layer Selection
+Recompute `FixAtoms(indices=[...])` for each system using geometric criteria or atom tags.
 ```python
-# 示例：按 z 坐标分层聚类后固定最底层 n_fix 层
+# Group atoms by z coordinate and fix the bottom n_fix layers.
 import numpy as np
 from ase.constraints import FixAtoms
 
 z = atoms.positions[:, 2]
-layer_tol = 0.4  # Å，视体系层间距调整
+layer_tol = 0.4  # Å, adjust for the layer spacing
 order = np.argsort(z)
 layers = []
 for idx in order:
@@ -30,14 +30,14 @@ fixed_indices = [idx for layer in layers[:2] for idx in layer]
 atoms.set_constraint(FixAtoms(indices=fixed_indices))
 ```
 
-### 吸附位点与构象去重
-- 批量枚举吸附位点（如用 `pymatgen` `AdsorbateSiteFinder` 或 ASE 网格扫描）时，保留 `site_type`、`orientation`、`conformer_id`。
-- 判断初始构型是否重复时，应使用**周期性最小像距对齐后的重原子 RMSD**（如 `rmsd < 0.2 Å` 且元素配位指纹相同），不要仅凭晶格分数坐标接近或优化后能量接近就合并不同异构体。
+### Adsorption Sites and Conformer Deduplication
+- For batches of sites generated using `pymatgen` `AdsorbateSiteFinder` or an ASE grid scan, record `site_type`, `orientation`, and `conformer_id`.
+- Identify duplicate starting structures by heavy-atom RMSD after minimum-image alignment, for example `rmsd < 0.2 Å` with matching element-specific coordination fingerprints. Preserve distinct isomers even if their fractional coordinates or relaxed energies are close.
 
-## 2. 溶剂盒与离子放置
+## 2. Solvent and Ion Placement
 
-### Packmol 边界容差写法
-Packmol 默认在非周期盒内排布分子。若直接指定 `inside box 0. 0. 0. Lx Ly Lz`，盒子边缘放置的原子可能与周期镜像发生重叠。通用做法是将放置区间向内缩进至少 `tol / 2`（通常取 `1.0–1.5 Å`）：
+### Packmol Boundary Tolerance
+Packmol uses nonperiodic placement by default. With `inside box 0. 0. 0. Lx Ly Lz`, atoms near opposite edges can overlap after imposing PBC. A common approach is to inset the placement region by at least `tol / 2`, typically `1.0–1.5 Å`.
 
 ```text
 tolerance 2.0
@@ -55,15 +55,15 @@ structure water.xyz
 end structure
 ```
 
-- 若希望溶剂只填充至表面上方指定厚度 `H_sol`（保留上方真空），应以 `z_slab_top`（表面最高原子 $z$ 坐标）动态计算上下限：`[z_slab_top + d_gap, z_slab_top + d_gap + H_sol]`，不要硬编码绝对 $z$ 数值。
-- 若存在双界面或上下双表面，需考虑下表面底部的排除区与顶面镜像之间的实际可及区间。
+- To fill a layer of thickness `H_sol` above the surface and leave vacuum, derive the bounds from `z_slab_top`, the highest surface-atom $z$ coordinate. Use `[z_slab_top + d_gap, z_slab_top + d_gap + H_sol]`.
+- For two interfaces or two exposed slab faces, account for the accessible space between the lower surface's exclusion region and the upper surface's periodic image.
 
-### 离子与质子缺陷
-- 插入反离子（如 $\text{K}^+$、$\text{Na}^+$、$\text{ClO}_4^-$）时，按预设距离区间搜索无碰撞位点（如距离表面金属 $\ge 2.5\,\text{\AA}$，距离其他溶质/离子 $\ge 2.0\,\text{\AA}$）。
-- 仅在实验明确研究恒定高度约束或面内扩散时，才对离子施加 `FixedLine` 或 `FixCartesian` 约束；默认应让离子全自由度弛豫。
-- 由水生成 $\text{H}_3\text{O}^+$ / $\text{OH}^-$ 时，明确记录：变更的分子索引、新增/删除的 H 原子索引、新净电荷，以及后续电子结构计算所需的 `NELECT`（VASP）或 `CHARGE`（CP2K）。
+### Ions and Proton Defects
+- For counterions such as $\text{K}^+$, $\text{Na}^+$, and $\text{ClO}_4^-$, search for sites satisfying the prescribed clearances, for example $\ge 2.5\,\text{\AA}$ from surface metal and $\ge 2.0\,\text{\AA}$ from other solutes or ions.
+- Allow ions to relax in all directions by default. Use `FixedLine` or `FixCartesian` for studies that explicitly require fixed height or in-plane motion.
+- When forming $\text{H}_3\text{O}^+$ or $\text{OH}^-$ from water, record the modified molecule index, added or removed H indices, net charge, and the required `NELECT` (VASP) or `CHARGE` (CP2K).
 
-## 3. 多初态与可重复性
+## 3. Starting Structures and Reproducibility
 
-- **受控比较**（例如对比不同吸附物或不同电势下的同一界面）：保留相同的基底几何、水分子初始构型及构建随机种子，并在元数据中记录 `reference_model_id` 与实际改变的参数。
-- **独立重复采样（Replicas）**：不要把同一个构建构型简单复制 3 份当作独立重复。若需多个独立初态，应使用不同的 Packmol `seed` 重新生成，或从预平衡轨迹中相隔足够弛豫时间的不同帧抽取并分别重新赋速。
+- **Controlled comparisons.** When comparing adsorbates or potentials at the same interface, retain the substrate geometry, initial water structure, and build seed. Record `reference_model_id` and the parameters that changed.
+- **Independent replicas.** Generate separate starting structures with different Packmol `seed` values, or extract frames separated by sufficient relaxation time from an equilibrated trajectory and assign velocities independently.

@@ -1,45 +1,45 @@
-# 阶段 1–2：通用势预采样、构型筛选与覆盖审计
+# Stages 1–2. Foundation-Model Sampling, Selection, and Coverage
 
-相关开源库：[SINGROUP/dscribe](https://github.com/SINGROUP/dscribe)、[dskoda/quests](https://github.com/dskoda/quests)、[ACEsuit/mace](https://github.com/ACEsuit/mace)。
+Upstream libraries. [DScribe](https://github.com/SINGROUP/dscribe) · [QUESTS](https://github.com/dskoda/quests) · [MACE](https://github.com/ACEsuit/mace)
 
-## 1. 阶段 1：通用势函数预采样策略
+## 1. Stage 1. Presample with a Foundation Potential
 
-利用通用基础势（Foundation MLP，如 `mace-mp`、`mace-mh` 等，或上一代初版模型）先做低成本广域采样，建立覆盖反应与非反应通道的候选轨迹池：
+Use a foundation MLP such as `mace-mp` or `mace-mh`, or an earlier model, to sample broadly at low cost and build a candidate pool of reactive and nonreactive trajectories.
 
-1. **多条件自由 MD**：覆盖实际拟研究的**晶胞尺寸**（如小胞训练、多尺度泛化对照）、**组分配比**（如无吸附、单吸附、共吸附、不同离子/溶质数）以及**梯度温度**（例如 `300 K` 采集物理平衡构象、`350–400 K` 适度加速溶剂与离子重排）。
-2. **反应状态引导采样（如伞形窗口 / 双端起点）**：
-   - 自由 MD 极难自然跨越较高反应能垒，必须沿着反应坐标（如成/断键距离 $d$）布设多个连续伞窗（$V = \frac{1}{2}k(d - d_0)^2$），并在核心过渡区加密采样配额；
-   - **双支独立起始构型**：同一窗口尽可能分别从反应物侧和产物侧取独立合理构型拉入窗口，避免两半采样陷入同一局域氢键笼；
-   - **完整跑完标记**：每条轨迹记录配置摘要、热力学表（含偏置能、反应坐标与最大受力），完整退出时写入 `complete.txt` 等帧数校验标记，筛选脚本先校验轨迹完整度再读取。
+1. **Unbiased MD across conditions**. Cover target cell sizes (such as small-cell training and multiple-size generalization), compositions (bare, single adsorption, coadsorption, different ion or solute counts), and temperatures (such as `300 K` for equilibrium configurations and `350–400 K` for faster solvent and ion rearrangement).
+2. **Sampling along reaction coordinates with umbrella windows or starts from both sides**
+   - When barriers are rarely crossed in unbiased MD, set consecutive umbrella windows along a coordinate such as a forming or breaking bond length $d$ with $V = \frac{1}{2}k(d - d_0)^2$. Increase sampling near the transition region.
+   - **Independent starts from both sides**. Where possible, initialize each window from physically plausible structures from both reactant and product sides to reduce trapping in the same local hydrogen-bond cage.
+   - **Completion records**. Record settings and thermodynamics, including bias energy, reaction coordinate, and maximum force. On successful completion write `complete.txt` or an equivalent frame-count marker. Check trajectory completeness before selection.
 
-## 2. 阶段 2：拓扑健康过滤与反应态保护
+## 2. Stage 2. Filter Invalid Topologies and Preserve Reactive Configurations
 
-选帧前先逐帧诊断拓扑与反应状态（记录淘汰统计，不静默丢帧）：
-- **必须过滤的损坏帧**：坐标含 `NaN/Inf`、关键非反应物种发生解离或质子逃逸（如普通水分子 $\text{O–H} > 1.30\ \text{\AA}$ 或邻水拓扑异常，视具体研究体系界定）、核间距严重碰撞（`< 0.70–0.75 Å`），以及伞窗中实际偏离窗口中心过远的帧（`|d - d0| > max_offset`）。
-- **禁止误杀核心反应态**：正在成/断键的反应物种（如过渡态键长、质子转移中 `O–H ~ 0.95–1.30 Å`）属于最有价值的数据，需按物种角色单独设置合理的宽松化学区间，并根据关键坐标划分为明确反应状态标签（如 `bare` / `adsorbed` / `approach` / `barrier` / `product`）。
+Check each frame for topology and reaction state before selection and record exclusion counts.
+- **Damaged frames**. Remove `NaN/Inf` coordinates, unintended dissociation or proton escape in nonreactive species (such as water $\text{O–H} > 1.30\ \text{\AA}$ or abnormal neighbor topology, as appropriate), severe atomic overlap (`< 0.70–0.75 Å`), and excessive umbrella-center deviations (`|d - d0| > max_offset`).
+- **Reactive frames**. Keep plausible forming or breaking bonds, including transition-region bond lengths and `O–H ~ 0.95–1.30 Å` during proton transfer. Apply role-specific chemical ranges and label states by key coordinates, for example `bare`, `adsorbed`, `approach`, `barrier`, and `product`.
 
-## 3. 分角色局部描述符（避免体相水稀释）
+## 3. Role-Resolved Local Descriptors
 
-对于包含界面金属层、少数反应分子、微量离子与大量体相溶剂的体系，若对整帧所有原子做全局均值 SOAP，几十个溶剂分子的微弱涨落会完全淹没 2 个活性反应原子的关键变化。
+In systems with a metal interface, a few reactants and ions, and many solvent molecules, whole-frame mean SOAP can obscure changes at two reactive centers with fluctuations from dozens of solvent molecules.
 
-**推荐做法——分角色池化 + 辅助物理特征拼接**：
-1. 选定核心角色原子组（如 `[反应原子团 A, 反应原子团 B, 近邻活性表层原子, 关键离子, 近邻溶剂原子]`），仅以这些角色原子作 `centers` 计算局部描述符（SOAP 或 QUESTS 特征）；
-2. 每个角色内部原子向量先做 L2 归一化，对同角色求均值后再 L2 归一化，拼成固定维度结构向量；
-3. 按需拼接关键低维物理描述符（经合理尺度缩放与截断，例如离子距表面高度、第一水合层配位数、与吸附物的最近距离）；
-4. 也可配合 [dskoda/quests](https://github.com/dskoda/quests) 的局部原子环境信息覆盖与 MSC 算法直接在原子环境集合上评估信息空缺。
+Pool descriptors by role and append physical features as needed.
+1. Choose groups such as reactive group A, reactive group B, neighboring active surface atoms, key ions, and nearby solvent atoms. Use only these atoms as `centers` for local SOAP or QUESTS descriptors.
+2. L2-normalize each atom vector, average within each role, L2-normalize the means, and concatenate them into one fixed-size frame vector.
+3. Optionally append scaled and clipped physical features such as ion height, first-shell coordination, or nearest distance to the adsorbate.
+4. Use local-environment information coverage and MSC to identify gaps across the set of atomic environments. [QUESTS](https://github.com/dskoda/quests)
 
-## 4. 状态优先 FPS、时间冷却与配额规则
+## 4. State-Prioritized FPS, Time Separation, and Quotas
 
-同一条 MD 轨迹相邻步高度相关，选帧须在每条轨迹内部同时执行三重保护：
-1. **跨轨迹物理去重**：使用经过周期边界对齐和定量舍入的原子序号与坐标 SHA-256 指纹（`seen_signatures`），防止不同分支或静止片段选入完全重复的帧；
-2. **最小时间冷却间隔**：同条轨迹选中帧之间至少相隔 `MIN_TIME_SEPARATION`（典型如 `0.15 ps` / `150 fs`）；
-3. **状态/环境优先 + 最远点采样（FPS）**：
-   - 先保证当前轨迹观测到的每种**反应状态**（以及关键环境分箱）各选出最典型代表帧（最接近组内均向量或最具差异帧）；
-   - 若相邻窗口有成对分支（如 `reactant` 支已先选完），将已选支的特征矩阵传入 `paired_branch`，使另一支执行 FPS 时计算到“本支已选 + 对侧已选”的最小距离，显式错开分布；
-   - 余下配额由余弦或欧氏距离贪心 FPS 补齐；候选不足配额时严格报错或记录缺口，绝不复制凑数。
+Use the following controls for correlated trajectories.
+1. **Cross-trajectory deduplication**. Use SHA-256 fingerprints (`seen_signatures`) of atom indices and PBC-aligned, rounded coordinates to remove exact duplicates from branches or stationary segments.
+2. **Minimum time separation**. Require at least `MIN_TIME_SEPARATION` between selected frames from one trajectory, such as `0.15 ps` or `150 fs`.
+3. **State and environment coverage followed by farthest-point sampling (FPS)**
+   - First select a representative of each observed reaction state and key environmental bin, such as a point near the group mean or the most distinct candidate.
+   - For paired branches in neighboring windows, pass the already selected branch's features, such as the `reactant` branch, to `paired_branch`. Compute each candidate's minimum distance to selections from both branches to diversify coverage.
+   - Fill remaining quotas by greedy FPS with cosine or Euclidean distance. Report a shortfall when candidates run out and preserve unique selections.
 
-## 5. 输出清理与选后覆盖率审计（`coverage_analysis`）
+## 5. Clean Outputs and Audit Coverage (`coverage_analysis`)
 
-1. **剥离旧预测并保存约束**：写出 `selected.extxyz` 时置 `atoms.calc = None`、`write_results=False`，显式写出 `columns=["symbols", "positions", "move_mask"]`，**保留 `FixAtoms` 约束与来源元数据**（注意避开老版本 ASE 多帧一次写出只读第一帧 `move_mask` 的 bug：若多体系固定原子数不同，**逐帧调用 `write`** 确保每帧 `move_mask` 准确！）。
-2. **建立全局溯源表**：生成 `frames.csv`（含 `dataset_index`、源轨迹、1-based 源帧号、反应状态、坐标值、温度/窗口/种子号）。
-3. **强烈建议做一次覆盖审计**：对照整个 4 万帧候选池与精选子集（如 1,800 帧），统计关键物理描述符（反应坐标、离子高度、配位数、最近接触距离等）的边际分布、二维网格覆盖率（如 `raw_bin_fraction` 与多变量 `within_one_tolerance`），提前发现哪个区间出现采样空缺（例如自由 MD 与伞窗衔接断层）。
+1. **Remove stale predictions and retain constraints**. Clear `atoms.calc` in selected copies and remove stale keys from `atoms.info` and `atoms.arrays`. Write `selected.extxyz` with `write_results=False`, keeping provenance and constraints. For `FixAtoms`, use `columns=["symbols", "positions", "move_mask"]` as needed. Read back a sample with differing constraints and write frames individually if the installed ASE loses masks in multi-frame output.
+2. **Traceability table**. Include `dataset_index`, source trajectory, 1-based source frame, reaction state, coordinate value, temperature, window, and seed in `frames.csv`.
+3. **Coverage audit**. Compare the candidate pool (for example 40,000 frames) and selected subset (for example 1,800) using marginal distributions and two-dimensional grid coverage of reaction coordinates, ion heights, coordination, and nearest contacts. Use metrics such as `raw_bin_fraction` and multivariate `within_one_tolerance` to identify gaps, including at transitions between unbiased MD and umbrella windows.

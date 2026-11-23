@@ -2,67 +2,67 @@
 name: enhanced-sampling
 description: "End-to-end enhanced sampling and free energy workflow: design CVs and run inputs (VASP ICONST/Blue Moon/slow-growth/harmonic umbrella/MDALGO metadynamics, and PLUMED RESTRAINT/METAD/WT-Metadynamics/OPES_METAD/OPES_METAD_EXPLORE with ASE/CP2K/LAMMPS/i-PI), verify derivatives and bias convergence, and reconstruct PMFs with Blue Moon metric correction, WHAM, MBAR (pymbar), or c(t)/opes.bias reweighting and block error bars."
 ---
-# 增强采样与自由能分析
+# Enhanced Sampling and Free-Energy Analysis
 
-覆盖增强采样的完整生命周期：**CV 设计与物理选型 $\rightarrow$ VASP / PLUMED / ASE / MD 输入构建与离线校验 $\rightarrow$ 采样充分性/滞后诊断 $\rightarrow$ PMF（自由能面）重建与误差分析**。（静态零点能/熵与计算氢电极台阶图属于 `$che-calculation`。）
+Design and select collective variables (CVs), prepare and validate VASP, PLUMED, ASE, or MD inputs, diagnose sampling coverage and hysteresis, and reconstruct potentials of mean force (PMFs) with uncertainties. Use `$che-calculation` for static zero-point energy, entropy, and computational hydrogen electrode diagrams.
 
-## 开始前确认
+## Before Starting
 
-1. **物理坐标与维度**：反应物/产物基态构型、原子编号约定（VASP `ICONST` 与 PLUMED 均为 **1-based**；ASE 为 **0-based**）、周期边界跨界情况，以及拟用 CV 是否足以区分中间态与副反应。
-2. **方法与模拟引擎**：目标方法（Slow-growth / Blue Moon Constrained AIMD / Umbrella Sampling / Metadynamics / WT-Metadynamics / `OPES_METAD` / `OPES_METAD_EXPLORE`）与引擎（原生 VASP、CP2K、LAMMPS、ASE + MLP 或 i-PI）。
-3. **可用输出与统计量**：待分析时核对输入文件格式（VASP `REPORT` / `HILLSPOT`、CP2K `.lagrange_mult`、PLUMED `COLVAR` / `HILLS` / `KERNELS` / `OPES_STATE`）、温度 $T$ 与目标能量单位（`eV` vs `kJ/mol`）。
+1. **Physical coordinates and dimensionality**. Identify the reactant and product minima, index conventions (VASP `ICONST` and PLUMED are **1-based** and ASE is **0-based**), and periodic crossings. Check that the CV distinguishes intermediates and side reactions.
+2. **Method and engine**. Choose slow growth, Blue Moon constrained AIMD, umbrella sampling, metadynamics, WT-Metadynamics, `OPES_METAD`, or `OPES_METAD_EXPLORE`, and identify the engine (native VASP, CP2K, LAMMPS, ASE with an MLP, or i-PI).
+3. **Available output and statistics**. Check file formats (VASP `REPORT` or `HILLSPOT`, CP2K `.lagrange_mult`, and PLUMED `COLVAR`, `HILLS`, `KERNELS`, or `OPES_STATE`), temperature $T$, and target energy units (`eV` or `kJ/mol`).
 
-## 方法选型矩阵
+## Method Selection
 
-| 方法 | VASP 原生 | PLUMED | 适用场景 | 核心配置关键词 | 自由能重建 |
+| Method | Native VASP | PLUMED | Application | Key inputs | Free-energy reconstruction |
 |---|---|---|---|---|---|
-| **Slow-growth AIMD** | 是 (`-Dtbdyn`) | via i-PI / SMD | 已知 1D 路径快速扫描（需警惕滞后） | `ICONST status=0`, `LBLUEOUT`, `INCREM` | `REPORT` 梯度梯形积分（含去重） |
-| **Constrained AIMD (Blue Moon)** | 是 (`-Dtbdyn`) | via CP2K / i-PI | 沿已知 1D CV 的高精度 AIMD 能垒 | `ICONST status=0`, `LBLUEOUT=.TRUE.` | 度量修正 $Z^{-1/2}(-\lambda+k_BTG)$ 积分 |
-| **Umbrella Sampling** | 是 (`status=8`) | `RESTRAINT` | 高能垒/明确反应坐标、并行分段取样 | `SPRING_K`/`SPRING_R0`; `AT`/`KAPPA` | WHAM / `pymbar` MBAR + 重叠检查 |
-| **标准 Metadynamics** | 是 (`MDALGO=11/21`) | `METAD` | VASP 原生 AIMD 探索（无 WT 衰减） | `status=5`, `HILLS_BIN/H/W`, `PENALTYPOT` | `HILLSPOT` 叠加（警惕过填） |
-| **WT-Metadynamics** | 否（需外部接口） | `METAD` + `BIASFACTOR` | 经典 MD / MLIP / CP2K / ASE，带高度衰减 | `BIASFACTOR`, `GRID_*`, `CALC_RCT` | `sum_hills` 或 `metad.rct` $c(t)$ 重加权 |
-| **`OPES_METAD`** | 否（需外部接口） | `OPES_METAD` | 能垒大致已知、CV 较好时快速收敛 PMF | `BARRIER`, `PACE`, `TEMP`, `STATE_*` | 抛弃前段瞬态后用 `opes.bias` 重加权 |
-| **`OPES_METAD_EXPLORE`** | 否（需外部接口） | `OPES_METAD_EXPLORE` | 未知能垒、探索多通道/新 CV | `BARRIER`/`BIASFACTOR`, `EXCLUDED_REGION` | 抛弃更长初始探索段后用 `opes.bias` 重加权 |
+| **Slow-growth AIMD** | Yes (`-Dtbdyn`) | via i-PI / SMD | Fast scans along a known 1D path, with hysteresis checks | `ICONST status=0`, `LBLUEOUT`, `INCREM` | Trapezoidal integration of deduplicated `REPORT` gradients |
+| **Constrained AIMD (Blue Moon)** | Yes (`-Dtbdyn`) | via CP2K / i-PI | Integrate gradients along a known 1D CV | `ICONST status=0`, `LBLUEOUT=.TRUE.` | Estimate metric-weighted window gradients and integrate |
+| **Umbrella Sampling** | Yes (`status=8`) | `RESTRAINT` | High barriers, known coordinates, and parallel window sampling | `SPRING_K` / `SPRING_R0` or `AT` / `KAPPA` | WHAM or `pymbar` MBAR with overlap checks |
+| **Standard Metadynamics** | Yes (VASP 6 `MDALGO=1/2`, VASP 5.x `11/21`) | `METAD` | Native VASP AIMD exploration with fixed hill heights | `status=5`, `HILLS_BIN/H/W`, `PENALTYPOT` | Sum `HILLSPOT` hills and check convergence |
+| **WT-Metadynamics** | External interface | `METAD` with `BIASFACTOR` | Classical MD, MLIP, CP2K, or ASE with tempered hill heights | `BIASFACTOR`, `GRID_*`, `CALC_RCT` | `sum_hills` or $c(t)$ reweighting with `metad.rct` |
+| **`OPES_METAD`** | External interface | `OPES_METAD` | Fast PMF convergence with a suitable CV and approximate barrier | `BARRIER`, `PACE`, `TEMP`, `STATE_*` | Reweight by `opes.bias` after discarding the initial transient |
+| **`OPES_METAD_EXPLORE`** | External interface | `OPES_METAD_EXPLORE` | Unknown barriers, multiple pathways, or new CVs | `BARRIER` / `BIASFACTOR`, `EXCLUDED_REGION` | Discard a longer exploration transient, then reweight by `opes.bias` |
 
-## 工作流程
+## Workflow
 
-### 1. CV 设计与导数/极限核验
-- 键长/键角/二面角及差值（如质子转移 `R1 - R2`）优先选用平滑、无奇点、与目标自由能过程正交度低的坐标；复杂断键重排或配位数切换 CV 按需参阅 [reactive-cv.md](references/reactive-cv.md)。
-- 对复杂反应 CV 在部署长轨迹前执行静态结构校验与有限差分导数/作用力验证。
+### 1. Design CVs and Check Derivatives and Limits
+- Prefer smooth, nonsingular coordinates that track the target process, such as distances, angles, dihedrals, and differences like `R1 - R2` for proton transfer. For complex rearrangements or coordination switches, see [Reactive CVs](references/reactive-cv.md).
+- Check complex reactive CVs on static structures and verify derivatives and forces by finite differences before long simulations.
 
-### 2. 引擎输入配置与单位核对
-- **原生 VASP**：按 [vasp-sampling.md](references/vasp-sampling.md) 配置 `INCAR`、`ICONST`（区分 `status=0/4/5/7/8`）、`LBLUEOUT`、`INCREM`、`SPRING_K`/`SPRING_R0` 或 `MDALGO=11/21` + `HILLS_*` + `PENALTYPOT`。注意原生 VASP **不支持 WT-Metadynamics 与 OPES**。
-- **PLUMED / ASE / CP2K / LAMMPS**：按 [plumed-sampling.md](references/plumed-sampling.md) 配置 `UNITS LENGTH=A TIME=fs ENERGY=eV`（或对应力场单位）、`RESTRAINT`、`METAD`（必设 `GRID_*` 与 `CALC_RCT`）或 `OPES_METAD` / `OPES_METAD_EXPLORE`（严格校验 `BARRIER` 能量单位、`EXCLUDED_REGION` 与 `STATE_WFILE`/`STATE_RFILE`）。
-- 投产前在本地或头节点用单帧 `plumed driver` 验证语法、核模块与首帧 CV 值；多段重启时强制对齐 `COLVAR`/`KERNELS`/`OPES_STATE` 或 `HILLSPOT -> PENALTYPOT` 状态。
+### 2. Configure Engine Inputs and Units
+- **Native VASP**. Set up `INCAR`, `ICONST`, and the bias as described in [VASP Sampling](references/vasp-sampling.md). For standard MetaD, select `MDALGO` for the installed version and set `HILLS_*` and optional `PENALTYPOT`. WT-Metadynamics and OPES use an external interface.
+- **PLUMED, ASE, CP2K, and LAMMPS**. Configure units and biases using [PLUMED Sampling](references/plumed-sampling.md). WT-MetaD $c(t)$ reweighting requires `GRID_*` and `CALC_RCT`. For OPES, check `BARRIER` units, the action referenced by `EXCLUDED_REGION`, and restart state.
+- Use single-frame `plumed driver` locally or on a head node to check syntax, kernel modules, and initial CVs. Align `COLVAR`, `KERNELS`, and `OPES_STATE` or `HILLSPOT -> PENALTYPOT` across restart segments.
 
-### 3. 采样诊断与稳态筛选
-- **Slow-growth**：对比正/反向拉动或更小 `INCREM` 验证滞后，合并续算时剔除边界重复帧。
-- **Umbrella / Constrained AIMD**：按窗口检查时间序列平衡并截除初段弛豫；Umbrella 必须确认相邻窗口直方图明显重叠。
-- **WT-Metadynamics / OPES**：在 `COLVAR` 中核对**反应物–过渡区–产物多次往返穿越（recrossing）**，检查 `metad.rct` 增长率或 `opes.rct` / `opes.zed` / `opes.neff` 平台期以划定稳态起点。
+### 3. Diagnose Sampling and Identify Steady Segments
+- **Slow growth**. Compare forward and reverse pulls or use a smaller `INCREM` to check hysteresis. Remove confirmed boundary duplicates when merging restarts.
+- **Umbrella sampling and constrained AIMD**. Check equilibration in each window and discard the initial relaxation. For umbrella sampling, verify substantial histogram overlap between neighbors.
+- **WT-Metadynamics and OPES**. Check recrossings and PMF drift across time blocks. For OPES, use `opes.rct`, `opes.zed`, and the bias shape to assess quasi-stationarity, and `opes.neff` to assess the reweighted effective sample size.
 
-### 4. PMF 重建与误差分析
-- 严格遵循 [estimators.md](references/estimators.md) 执行公式一致的数据重建：
-  - Blue Moon / Slow-growth：梯度提取、度量修正及梯形积分（显式声明任何简化近似）。
-  - Umbrella：WHAM 或无箱 MBAR（`pymbar`），三维径向距离 CV 需审视是否加 $(d-1)k_B T \ln r$ 雅可比修正。
-  - WT-Metad / OPES：以与 `UNITS` 一致的 $k_B T$ 执行 $c(t)$ 或 `opes.bias` 指数重加权，**必须验证分块时间漂移（block drift）**并给出分块误差 / bootstrap / `statistical_inefficiency` 置信区间。
+### 4. Reconstruct the PMF and Quantify Uncertainty
+- Follow the equations in [Free-Energy Estimators](references/estimators.md).
+  - For Blue Moon or slow growth, extract gradients, apply metric corrections, and integrate by the trapezoidal rule. State all approximations.
+  - For umbrella sampling, use WHAM or binless MBAR (`pymbar`). For a three-dimensional radial CV, evaluate whether to apply the $(d-1)k_B T \ln r$ Jacobian correction.
+  - For WT-MetaD or OPES, use $k_B T$ consistent with `UNITS` for exponential reweighting with $c(t)$ or `opes.bias`. Check temporal block drift and report block errors or confidence intervals from bootstrap or `statistical_inefficiency` estimates.
 
-## 按需参考文档与开源工具
+## References and Open-Source Tools
 
-- **VASP 原生设定**：[VASP 增强采样配置（ICONST / Blue Moon / Umbrella / Metadynamics）](references/vasp-sampling.md)
-- **PLUMED / ASE / OPES 设定**：[PLUMED 采样配置（Umbrella / WT-Metad / OPES / OPES Explore）](references/plumed-sampling.md)
-- **反应性 CV 设计**：[反应性 CV、Voronoi/Grotthuss 追踪与导数测试](references/reactive-cv.md)
-- **PMF 重建与统计**：[自由能估算器、重加权与分块误差分析](references/estimators.md)
+- [Native VASP sampling with ICONST, Blue Moon, Umbrella Sampling, and Metadynamics](references/vasp-sampling.md)
+- [PLUMED and ASE settings for Umbrella Sampling, WT-MetaD, OPES, and OPES Explore](references/plumed-sampling.md)
+- [Reactive CVs, Voronoi and Grotthuss Tracking, and Derivative Tests](references/reactive-cv.md)
+- [Free-Energy Estimators, Reweighting, and Block Errors](references/estimators.md)
 
-复用关键开源项目：
+Useful upstream projects are listed below.
 
-| 工具 / 方法 | GitHub 仓库 |
+| Tool or method | GitHub repository |
 |---|---|
 | PLUMED 2（Metadynamics / WT-Metad / Umbrella / OPES / `driver`） | [plumed/plumed2](https://github.com/plumed/plumed2) |
-| PyMBAR（MBAR 重加权与 `statistical_inefficiency`） | [choderalab/pymbar](https://github.com/choderalab/pymbar) |
+| PyMBAR (MBAR reweighting and `statistical_inefficiency`) | [choderalab/pymbar](https://github.com/choderalab/pymbar) |
 | Grossfield WHAM（1D/2D Umbrella `wham`） | [agrossfield/wham](https://github.com/agrossfield/wham) |
-| i-PI 与 VASP Slow-growth 扩展 | [i-pi/i-pi](https://github.com/i-pi/i-pi) · [zhangchenyu-USTC/i-pi_slow-growth](https://github.com/zhangchenyu-USTC/i-pi_slow-growth) |
+| i-PI and VASP slow-growth extension | [i-pi/i-pi](https://github.com/i-pi/i-pi) · [zhangchenyu-USTC/i-pi_slow-growth](https://github.com/zhangchenyu-USTC/i-pi_slow-growth) |
 
-## 交付产物与验收
+## Deliverables and Validation
 
-- **输入与校对阶段**：可运行的参数文件（`INCAR` 片段/`ICONST`/`PENALTYPOT` 或 `plumed.dat` + 驱动器配置），并通过单帧 `driver`/首步 CV 数值及单位一致性核对。
-- **后处理与报告阶段**：可重复的 Python 重建与诊断脚本、标注采样诊断（recrossing、窗口重叠或滞后对比）与统计误差棒的 PMF 图表及表格，并在输出中明确所采用的约定（如 $\frac{1}{2}\kappa$、雅可比修正、丢弃的瞬态长度与是否省略度量项 $Z$）。
+- **Input preparation**. Provide runnable `INCAR` fragments, `ICONST`, and `PENALTYPOT` or `plumed.dat` and its driver configuration. Verify units and first-frame CV values with a single-frame `driver` check or the first simulation step.
+- **Analysis**. Provide reproducible Python reconstruction and diagnostic scripts, PMF plots and tables with statistical errors, and diagnostics such as recrossings, window overlap, or hysteresis. Document the $\frac{1}{2}\kappa$ convention, Jacobian correction, discarded transient length, and any omission of the metric $Z$.
